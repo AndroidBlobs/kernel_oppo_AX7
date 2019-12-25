@@ -448,7 +448,18 @@ static int cmdq_enable(struct mmc_host *mmc)
 	cmdq_writel(cq_host, mmc->card->rca, CQSSC2);
 
 	/* send QSR at lesser intervals than the default */
+#ifndef VENDOR_EDIT
+//Guohua.Zhong@BSP.Storage.Emmc, 2018/07/22, Keep clock toggling during SEND_ QUEUE_STATUS(cmd13) QSR polling
 	cmdq_writel(cq_host, SEND_QSR_INTERVAL, CQSSC1);
+#else/*VENDOR_EDIT*/
+	if((mmc->card->cid.manfid == CID_MANFID_MICRON) && (strncmp(mmc->card->cid.prod_name,"Q3J97V",strlen("Q3J97V")) == 0))
+	{
+		cmdq_writel(cq_host, SEND_QSR_INTERVAL_MICRON, CQSSC1);
+	} else {
+		cmdq_writel(cq_host, SEND_QSR_INTERVAL, CQSSC1);
+	}
+	//printk("cmdq_enable,mmc->card->cid.manfid = %x,cmdq_readl(cq_host, CQSSC1) = 0x%x\n",mmc->card->cid.manfid, cmdq_readl(cq_host, CQSSC1));
+#endif/*VENDOR_EDIT*/
 
 	/* enable bkops exception indication */
 	if (mmc_card_configured_manual_bkops(mmc->card) &&

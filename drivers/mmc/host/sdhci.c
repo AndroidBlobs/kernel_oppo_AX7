@@ -58,9 +58,26 @@ static void sdhci_enable_sdio_irq_nolock(struct sdhci_host *host, int enable);
 
 static void sdhci_enable_preset_value(struct sdhci_host *host, bool enable);
 
+#ifdef VENDOR_EDIT
+//yixue.ge@BSP.drv 2014-06-04 modify for disable sdcard log
+#ifndef CONFIG_OPPO_DAILY_BUILD
+static int flag = 0;
+#endif
+#endif
+
 static void sdhci_dump_state(struct sdhci_host *host)
 {
 	struct mmc_host *mmc = host->mmc;
+
+#ifdef VENDOR_EDIT
+//yixue.ge@BSP.drv 2014-06-04 modify for disable sdcard log
+#ifndef CONFIG_OPPO_DAILY_BUILD
+	if(!flag)
+		flag++;
+	else
+		return;
+#endif
+#endif
 
 	#ifdef CONFIG_MMC_CLKGATE
 	pr_info("%s: clk: %d clk-gated: %d claimer: %s pwr: %d host->irq = %d\n",
@@ -1222,6 +1239,19 @@ void sdhci_send_command(struct sdhci_host *host, struct mmc_command *cmd)
 	unsigned long timeout;
 
 	WARN_ON(host->cmd);
+
+#ifdef VENDOR_EDIT
+//yh@bsp, 2015-10-21 Add for special card compatible
+//Guohua.Zhong@BSP.Storage.Sdcard,20180630 modify for use is_fsck_process whitelist "fsck"
+	if(host->mmc->card_stuck_in_programing_status)
+	{
+		//pr_info("%s:card_stuck_in_programing_status cmd:%d\n", mmc_hostname(host->mmc), cmd->opcode );
+
+		cmd->error = -EIO;
+		sdhci_finish_mrq(host, cmd->mrq);
+		return;
+	}
+#endif /* VENDOR_EDIT */
 
 	/* Initially, a command has no error */
 	cmd->error = 0;

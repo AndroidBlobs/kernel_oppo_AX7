@@ -98,6 +98,10 @@ void mmc_decode_cid(struct mmc_card *card)
 	card->cid.month			= UNSTUFF_BITS(resp, 8, 4);
 
 	card->cid.year += 2000; /* SD cards year offset */
+#ifdef VENDOR_EDIT
+//yh@PhoneSW.BSP, 2016-09-18, add print cid info for possible quick use
+	pr_info("name:%s,manfid:%x,oemid:%x\n", card->cid.prod_name, card->cid.manfid, card->cid.oemid);
+#endif
 }
 
 /*
@@ -433,6 +437,18 @@ static void sd_update_bus_speed_mode(struct mmc_card *card)
 	    (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR104) &&
 	    (card->host->f_max > UHS_SDR104_MIN_DTR)) {
 		card->sd_bus_speed = UHS_SDR104_BUS_SPEED;
+#ifdef VENDOR_EDIT
+//Guohua.Zhong@BSP.Storage.Sdcard, 2018/05/15 fix sdcard type detect order
+	} else if ((card->host->caps & MMC_CAP_UHS_DDR50) &&
+		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_DDR50) &&
+		    (card->host->f_max > UHS_DDR50_MIN_DTR)) {
+		card->sd_bus_speed = UHS_DDR50_BUS_SPEED;
+	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
+		    MMC_CAP_UHS_SDR50)) && (card->sw_caps.sd3_bus_mode &
+		    SD_MODE_UHS_SDR50) &&
+		    (card->host->f_max > UHS_SDR50_MIN_DTR)) {
+		card->sd_bus_speed = UHS_SDR50_BUS_SPEED;
+#else
 	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
 		    MMC_CAP_UHS_SDR50)) && (card->sw_caps.sd3_bus_mode &
 		    SD_MODE_UHS_SDR50) &&
@@ -442,6 +458,7 @@ static void sd_update_bus_speed_mode(struct mmc_card *card)
 		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_DDR50) &&
 		    (card->host->f_max > UHS_DDR50_MIN_DTR)) {
 		card->sd_bus_speed = UHS_DDR50_BUS_SPEED;
+#endif /*VENDOR_EDIT*/
 	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
 		    MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR25)) &&
 		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR25) &&
@@ -1169,9 +1186,6 @@ static void mmc_sd_remove(struct mmc_host *host)
  */
 static int mmc_sd_alive(struct mmc_host *host)
 {
-	if (host->ops->get_cd && !host->ops->get_cd(host))
-		return -ENOMEDIUM;
-
 	return mmc_send_status(host->card, NULL);
 }
 
@@ -1200,16 +1214,6 @@ static void mmc_sd_detect(struct mmc_host *host)
 		return;
 	}
 
-	if (mmc_bus_needs_resume(host))
-		mmc_resume_bus(host);
-
-	if (host->ops->get_cd && !host->ops->get_cd(host)) {
-		err = -ENOMEDIUM;
-		mmc_card_set_removed(host->card);
-		mmc_card_clr_suspended(host->card);
-		goto out;
-	}
-
 	/*
 	 * Just check if our card has been removed.
 	 */
@@ -1228,11 +1232,15 @@ static void mmc_sd_detect(struct mmc_host *host)
 		       __func__, mmc_hostname(host), err);
 		err = _mmc_detect_card_removed(host);
 	}
+#if defined(MOUNT_EXSTORAGE_IF)
+	/*ye.zhang@BSP, 2016-05-01, add for CTSI support external storage or not*/
+	if (retries)
+		err = _mmc_detect_card_removed(host);
+#endif//MOUNT_EXSTORAGE_IF
 #else
 	err = _mmc_detect_card_removed(host);
 #endif
 
-out:
 	mmc_put_card(host->card);
 
 	if (err) {
@@ -1317,10 +1325,13 @@ static int _mmc_sd_resume(struct mmc_host *host)
 	if (!mmc_card_suspended(host->card))
 		goto out;
 
-	if (host->ops->get_cd && !host->ops->get_cd(host)) {
-		mmc_card_clr_suspended(host->card);
-		goto out;
+#ifdef VENDOR_EDIT
+//Guohua.Zhong@BSP.Storage.Sdcard, 2018-05-03 check if sdcard is present before detect
+	if (!host->ops->get_cd(host)) {
+		err = -ENOENT;
+		goto remove;
 	}
+#endif /*VENDOR_EDIT*/
 
 	mmc_power_up(host, host->card->ocr);
 #ifdef CONFIG_MMC_PARANOID_SD_INIT
@@ -1343,6 +1354,11 @@ static int _mmc_sd_resume(struct mmc_host *host)
 #else
 	err = mmc_sd_init_card(host, host->card->ocr, host->card);
 #endif
+
+#ifdef VENDOR_EDIT
+//Guohua.Zhong@BSP.Storage.Sdcard, 2018-05-03 check if sdcard is present before detect
+remove:
+#endif /*VENDOR_EDIT*/
 	if (err == -ENOENT) {
 		pr_debug("%s: %s: found a different card(%d), do detect change\n",
 			mmc_hostname(host), __func__, err);
@@ -1417,9 +1433,6 @@ static int mmc_sd_runtime_resume(struct mmc_host *host)
 
 static int mmc_sd_reset(struct mmc_host *host)
 {
-	if (host->ops->get_cd && !host->ops->get_cd(host))
-		return -ENOMEDIUM;
-
 	mmc_power_cycle(host, host->card->ocr);
 	return mmc_sd_init_card(host, host->card->ocr, host->card);
 }
@@ -1450,6 +1463,13 @@ int mmc_attach_sd(struct mmc_host *host)
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
 
+#ifdef VENDOR_EDIT
+    //Lycan.Wang@Prd.BasicDrv, 2014-07-10 Add for retry 5 times when new sdcard init error
+	if (!host->detect_change_retry) {
+        pr_err("%s have init error 5 times\n", __func__);
+        return -ETIMEDOUT;
+    }
+#endif /* VENDOR_EDIT */
 	err = mmc_send_app_op_cond(host, 0, &ocr);
 	if (err)
 		return err;
@@ -1483,7 +1503,16 @@ int mmc_attach_sd(struct mmc_host *host)
 	 * Detect and init the card.
 	 */
 #ifdef CONFIG_MMC_PARANOID_SD_INIT
-	retries = 5;
+#ifndef VENDOR_EDIT
+    //Lycan.Wang@Prd.BasicDrv, 2014-07-10 Modify for init retry only once when have init error before
+    retries = 5;
+#else /* VENDOR_EDIT */
+    if (host->detect_change_retry < 5) 
+        retries = 1;
+    else
+        retries = 5;
+#endif /* VENDOR_EDIT */
+
 	while (retries) {
 		err = mmc_sd_init_card(host, rocr, NULL);
 		if (err) {
@@ -1520,7 +1549,10 @@ int mmc_attach_sd(struct mmc_host *host)
 		mmc_release_host(host);
 		goto remove_card;
 	}
-
+#ifdef VENDOR_EDIT
+	//Tong.han@Bsp.group.Tp, 2015-02-03 Add for retry 5 times when new sdcard init error
+	host->detect_change_retry = 5;
+#endif /* VENDOR_EDIT */
 	return 0;
 
 remove_card:
@@ -1529,6 +1561,13 @@ remove_card:
 	mmc_claim_host(host);
 err:
 	mmc_detach_bus(host);
+
+#ifdef VENDOR_EDIT
+    //Lycan.Wang@Prd.BasicDrv, 2014-07-10 Add for retry 5 times when new sdcard init error
+        if (err)//yh@bsp, 2016-03-17, this err could be caused by rescan disable, here reserve this aborted retry oppotunity.
+    host->detect_change_retry--;
+    pr_err("detect_change_retry = %d !!!,err = %d\n", host->detect_change_retry,err);
+#endif /* VENDOR_EDIT */
 
 	pr_err("%s: error %d whilst initialising SD card\n",
 		mmc_hostname(host), err);

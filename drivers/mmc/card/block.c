@@ -49,6 +49,12 @@
 #include <asm/uaccess.h>
 
 #include "queue.h"
+#ifdef VENDOR_EDIT
+//Zhilong.Zhang@OnlineRd.Driver, 2013/10/24, Add for eMMC and DDR device information
+#include <soc/oppo/device_info.h>
+#include <soc/oppo/oppo_project.h>
+#endif /* VENDOR_EDIT */
+
 #include "block.h"
 
 MODULE_ALIAS("mmc:block");
@@ -1536,6 +1542,10 @@ static int card_busy_detect(struct mmc_card *card, unsigned int timeout_ms,
 	unsigned long timeout = jiffies + msecs_to_jiffies(timeout_ms);
 	int err = 0;
 	u32 status;
+#ifdef VENDOR_EDIT
+//yh@PhoneSW.BSP, 2017-1-17, send card changing to RO mode uevent to android layer
+	char *envp[2] = {"sdcard_ro=1", NULL};
+#endif /* VENDOR_EDIT */
 
 	do {
 		err = get_card_status(card, &status, 5);
@@ -1564,6 +1574,14 @@ static int card_busy_detect(struct mmc_card *card, unsigned int timeout_ms,
 			pr_err("%s: Card stuck in programming state! %s %s\n",
 				mmc_hostname(card->host),
 				req->rq_disk->disk_name, __func__);
+#ifdef VENDOR_EDIT
+//1.yh@bsp, 2015-10-21 Add for special card compatible
+//2.yh@PhoneSW.BSP, 2017-1-17, send card changing to RO mode uevent to android layer
+			kobject_uevent_env(
+					&(card->dev.kobj),
+					KOBJ_CHANGE, envp);
+			card->host->card_stuck_in_programing_status = true;
+#endif /* VENDOR_EDIT */
 			return -ETIMEDOUT;
 		}
 
@@ -4099,13 +4117,6 @@ static int mmc_blk_cmdq_issue_rq(struct mmc_queue *mq, struct request *req)
 			if (ret == -EBUSY || ret == -EAGAIN) {
 				mmc_blk_cmdq_requeue_rw_rq(mq, req);
 				mmc_put_card(host->card);
-			} else if (ret == -ENOMEM) {
-				/*
-				 * Elaborate error handling is not needed for
-				 * system errors. Let the higher layer decide
-				 * on the next steps.
-				 */
-				goto out;
 			}
 		}
 	}
@@ -4618,6 +4629,7 @@ static const struct mmc_fixup blk_fixups[] =
 	 */
 	MMC_FIXUP(CID_NAME_ANY, CID_MANFID_MICRON, 0x200, add_quirk_mmc,
 		  MMC_QUIRK_LONG_READ_TIME),
+
 	MMC_FIXUP("008GE0", CID_MANFID_TOSHIBA, CID_OEMID_ANY, add_quirk_mmc,
 		  MMC_QUIRK_LONG_READ_TIME),
 
@@ -4670,6 +4682,13 @@ static const struct mmc_fixup blk_fixups[] =
 	MMC_FIXUP("SEM04G", 0x45, CID_OEMID_ANY, add_quirk_mmc,
 		  MMC_QUIRK_INAND_DATA_TIMEOUT),
 
+#ifdef VENDOR_EDIT
+	//Guohua.Zhong@BSP.Storage.Emmc, 2018/07/22, Keep clock toggling during SEND_ QUEUE_STATUS(cmd13) QSR polling
+	/* Some MICRON MCP keep clock toggling during SEND_ QUEUE_STATUS(cmd13) QSR polling */
+	MMC_FIXUP("Q3J97V", CID_MANFID_MICRON, CID_OEMID_ANY , add_quirk_mmc,
+		  MMC_QUIRK_BROKEN_CLK_GATING),
+#endif /* VENDOR_EDIT */
+
 	END_FIXUP
 };
 
@@ -4677,14 +4696,58 @@ static int mmc_blk_probe(struct mmc_card *card)
 {
 	struct mmc_blk_data *md, *part_md;
 	char cap_str[10];
+	#ifdef VENDOR_EDIT
+	//Zhilong.Zhang@OnlineRd.Driver, 2013/10/24, Add for eMMC and DDR device information
+	char * manufacturerid;
+    static char temp_version[10];
+	#endif /* VENDOR_EDIT */
 
 	/*
 	 * Check that the card supports the command class(es) we need.
 	 */
+#ifndef VENDOR_EDIT
+//yh@bsp, 2015/08/03, remove for can not initialize specific sdcard(CSD info mismatch card real capability)
 	if (!(card->csd.cmdclass & CCC_BLOCK_READ))
 		return -ENODEV;
+#endif
 
 	mmc_fixup_device(card, blk_fixups);
+#ifdef VENDOR_EDIT
+//Zhilong.Zhang@OnlineRd.Driver, 2013/10/24, Add for eMMC and DDR device information
+	switch (card->cid.manfid) {
+		case  0x11:
+			manufacturerid = "TOSHIBA";
+			break;
+		case  0x13:
+			manufacturerid = "MICRON";
+			break;	
+		case  0x15:
+			if(strncmp(card->cid.prod_name,"RH64MB",strlen("RH64MB")) == 0)
+				manufacturerid = "SAMSUNG_RH64MB_3D";
+			else if(strncmp(card->cid.prod_name,"RH64AB",strlen("RH64AB")) == 0)
+				manufacturerid = "SAMSUNG_RH64AB_3D";
+			else
+				manufacturerid = "SAMSUNG";
+			break;
+		case  0x45:
+			manufacturerid = "SANDISK";
+			break;
+		case  0x90:
+			manufacturerid = "HYNIX";
+			break;
+		case 0xFE:
+            manufacturerid = "ELPIDA";
+            break;
+                default:
+			manufacturerid = "unknown";
+			break;
+	}
+	if (!strcmp(mmc_card_id(card), "mmc0:0001")) {
+		sprintf(temp_version,"0x%02x,0x%llx",card->cid.prv,*(unsigned long long*)card->ext_csd.fwrev);
+		register_device_proc("emmc", mmc_card_name(card), manufacturerid);
+		register_device_proc("emmc_version", mmc_card_name(card), temp_version);
+	}
+#endif /* VENDOR_EDIT */
 
 	md = mmc_blk_alloc(card);
 	if (IS_ERR(md))
@@ -4701,7 +4764,13 @@ static int mmc_blk_probe(struct mmc_card *card)
 
 	dev_set_drvdata(&card->dev, md);
 
-	mmc_set_bus_resume_policy(card->host, 1);
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
+#ifdef VENDOR_EDIT
+//Guohua.Zhong@BSP.Storage.Sdcard,1411172 2018-07-18 disable CONFIG_MMC_BLOCK_DEFERRED_RESUME for sdcard only
+	if (!(mmc_card_is_removable(card->host) && !(card->host->caps & MMC_CAP_NEEDS_POLL)))
+#endif /*VENDOR_EDIT*/
+		mmc_set_bus_resume_policy(card->host, 1);
+#endif
 
 	if (mmc_add_disk(md))
 		goto out;
@@ -4746,7 +4815,13 @@ static void mmc_blk_remove(struct mmc_card *card)
 	pm_runtime_put_noidle(&card->dev);
 	mmc_blk_remove_req(md);
 	dev_set_drvdata(&card->dev, NULL);
-	mmc_set_bus_resume_policy(card->host, 0);
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
+#ifdef VENDOR_EDIT
+//Guohua.Zhong@BSP.Storage.Sdcard,1411172 2018-07-18 disable CONFIG_MMC_BLOCK_DEFERRED_RESUME for sdcard only
+	if (!(mmc_card_is_removable(card->host) && !(card->host->caps & MMC_CAP_NEEDS_POLL)))
+#endif /*VENDOR_EDIT*/
+		mmc_set_bus_resume_policy(card->host, 0);
+#endif
 }
 
 static int _mmc_blk_suspend(struct mmc_card *card, bool wait)

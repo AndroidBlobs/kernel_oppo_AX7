@@ -84,6 +84,11 @@
  */
 #define SEND_QSR_INTERVAL 0x70001
 
+#ifdef VENDOR_EDIT
+//Guohua.Zhong@BSP.Storage.Emmc, 2018/07/22, Keep clock toggling during SEND_ QUEUE_STATUS(cmd13) QSR polling
+#define SEND_QSR_INTERVAL_MICRON 0x70040
+#endif
+
 /* send status config 2 */
 #define CQSSC2		0x44
 
