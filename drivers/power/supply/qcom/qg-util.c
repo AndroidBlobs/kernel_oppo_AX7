@@ -111,22 +111,6 @@ out:
 	return rc;
 }
 
-int qg_read_raw_data(struct qpnp_qg *chip, int addr, u32 *data)
-{
-	int rc;
-	u8 reg[2] = {0};
-
-	rc = qg_read(chip, chip->qg_base + addr, &reg[0], 2);
-	if (rc < 0) {
-		pr_err("Failed to read QG addr %d rc=%d\n", addr, rc);
-		return rc;
-	}
-
-	*data = reg[0] | (reg[1] << 8);
-
-	return rc;
-}
-
 int get_fifo_length(struct qpnp_qg *chip, u32 *fifo_length, bool rt)
 {
 	int rc;
@@ -319,14 +303,18 @@ int qg_get_battery_temp(struct qpnp_qg *chip, int *temp)
 		return 0;
 	}
 
-	rc = qpnp_vadc_read(chip->vadc_dev, VADC_BAT_THERM_PU2, &result);
+	rc = qpnp_vadc_read(chip->vadc_dev, VADC_BAT_THERM_PU1, &result);
 	if (rc) {
 		pr_err("Failed reading adc channel=%d, rc=%d\n",
-					VADC_BAT_THERM_PU2, rc);
+					VADC_BAT_THERM_PU1, rc);
 		return rc;
 	}
-	pr_debug("batt_temp = %lld meas = 0x%llx\n",
-			result.physical, result.measurement);
+
+#ifndef VENDOR_EDIT
+/*Yichun.Chen@BSP.CHG.Basic  2018/05/25  Delete for reduce log*/
+	pr_err("batt_temp = %lld, meas = 0x%llx, adc channel = %d\n",
+			result.physical, result.measurement, VADC_BAT_THERM_PU1);
+#endif
 
 	*temp = (int)result.physical;
 

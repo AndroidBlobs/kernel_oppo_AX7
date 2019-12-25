@@ -103,6 +103,14 @@ static void update_msoc(struct qpnp_qg *chip)
 	int rc = 0, batt_temp = 0,  batt_soc_32bit = 0;
 	bool usb_present = is_usb_present(chip);
 
+#ifdef VENDOR_EDIT
+/* Yichun.Chen  PSW.BSP.CHG  2018-06-13  avoid when reboot soc reduce 1% */
+        if (chip->skip_scale_soc_count < 2) {
+                chip->catch_up_soc = chip->msoc;
+                chip->skip_scale_soc_count ++;
+        }
+#endif
+
 	if (chip->catch_up_soc > chip->msoc) {
 		/* SOC increased */
 		if (usb_present) /* Increment if USB is present */

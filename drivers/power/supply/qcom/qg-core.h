@@ -12,9 +12,16 @@
 #ifndef __QG_CORE_H__
 #define __QG_CORE_H__
 
+#ifdef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018-05-04  Add for debug */
+#define qg_debug(fmt, ...) \
+        printk(KERN_NOTICE "[OPPO_CHG][%s]"fmt, __func__, ##__VA_ARGS__)
+
+#define qg_err(fmt, ...) \
+        printk(KERN_ERR "[OPPO_CHG][%s]"fmt, __func__, ##__VA_ARGS__)
+#endif
 #include <linux/kernel.h>
 #include "fg-alg.h"
-#include "qg-defs.h"
 
 struct qg_batt_props {
 	const char		*batt_type_str;
@@ -51,26 +58,22 @@ struct qg_dt {
 	int			rbat_conn_mohm;
 	int			ignore_shutdown_soc_secs;
 	int			cold_temp_threshold;
-	int			esr_qual_i_ua;
-	int			esr_qual_v_uv;
-	int			esr_disable_soc;
 	bool			hold_soc_while_full;
 	bool			linearize_soc;
 	bool			cl_disable;
 	bool			cl_feedback_on;
-	bool			esr_disable;
-	bool			esr_discharge_enable;
 	bool			qg_ext_sense;
 };
 
-struct qg_esr_data {
-	u32			pre_esr_v;
-	u32			pre_esr_i;
-	u32			post_esr_v;
-	u32			post_esr_i;
-	u32			esr;
-	bool			valid;
+#ifdef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018-5-04  Add for anthenticate battery */
+enum oppo_battery_type {
+	NON_STD_BATT = 0,
+        OPPO_LG_BATT,
+	OPPO_SDI_BATT,
+	OPPO_ATL_BATT,
 };
+#endif
 
 struct qpnp_qg {
 	struct device		*dev;
@@ -103,7 +106,6 @@ struct qpnp_qg {
 	struct power_supply	*batt_psy;
 	struct power_supply	*usb_psy;
 	struct power_supply	*parallel_psy;
-	struct qg_esr_data	esr_data[QG_MAX_ESR_COUNT];
 
 	/* status variable */
 	u32			*debug_mask;
@@ -119,18 +121,10 @@ struct qpnp_qg {
 	bool			charge_full;
 	int			charge_status;
 	int			charge_type;
-	int			chg_iterm_ma;
 	int			next_wakeup_ms;
-	int			esr_actual;
-	int			esr_nominal;
-	int			soh;
-	int			soc_reporting_ready;
-	u32			fifo_done_count;
 	u32			wa_flags;
 	u32			seq_no;
 	u32			charge_counter_uah;
-	u32			esr_avg;
-	u32			esr_last;
 	ktime_t			last_user_update_time;
 	ktime_t			last_fifo_update_time;
 
@@ -141,19 +135,47 @@ struct qpnp_qg {
 	int			pon_soc;
 	int			batt_soc;
 	int			cc_soc;
-	int			full_soc;
 	struct alarm		alarm_timer;
 	u32			sdam_data[SDAM_MAX];
 
 	/* DT */
 	struct qg_dt		dt;
 	struct qg_batt_props	bp;
+
 	/* capacity learning */
 	struct cap_learning	*cl;
 	/* charge counter */
 	struct cycle_counter	*counter;
-	/* ttf */
-	struct ttf		*ttf;
+	char			counter_buf[BUCKET_COUNT * 8];
+
+#ifdef VENDOR_EDIT
+/* Yichun.Chen  PSW.BSP.CHG  2018-06-04  save soc */
+        /* Batt_info restore */
+	bool			soc_reporting_ready;
+	int			batt_info[6];
+	int			batt_info_id;
+	bool			batt_info_restore;
+	bool			*batt_range_ocv;
+	int			*batt_range_pct;
+#endif
+        
+#ifdef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018-05-04  Add for authenticate battery */
+	int			oppo_battery_type;
+#endif
+        
+#ifdef VENDOR_EDIT
+/* Yichun.Chen  PSW.BSP.CHG  2018-06-13  avoid when reboot soc reduce 1% */
+	int			skip_scale_soc_count;
+#endif
+
+#ifdef VENDOR_EDIT
+/* Yichun.Chen  PSW.BSP.CHG  2018-08-23  recognize SDI\ATL battery */
+	int			atl_battery_id_low;
+	int			atl_battery_id_high;
+	int			sdi_battery_id_low;
+	int			sdi_battery_id_high;
+#endif
 };
 
 struct ocv_all {
@@ -182,7 +204,6 @@ enum debug_mask {
 	QG_DEBUG_BUS_READ	= BIT(8),
 	QG_DEBUG_BUS_WRITE	= BIT(9),
 	QG_DEBUG_ALG_CL		= BIT(10),
-	QG_DEBUG_ESR		= BIT(11),
 };
 
 enum qg_irq {

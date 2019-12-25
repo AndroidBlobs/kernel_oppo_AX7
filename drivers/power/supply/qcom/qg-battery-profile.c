@@ -409,6 +409,26 @@ int lookup_soc_ocv(u32 *soc, u32 ocv_uv, int batt_temp, bool charging)
 	return 0;
 }
 
+#ifdef VENDOR_EDIT
+/* Yichun.Chen  PSW.BSP.CHG  2018-06-04  save soc */
+int lookup_ocv_soc(u32 *ocv_uv, u32 soc, int batt_temp, bool charging)
+{
+	u8 table_index = charging ? TABLE_SOC_OCV1 : TABLE_SOC_OCV2;
+
+	if (!the_battery || !the_battery->profile) {
+		pr_err("Battery profile not loaded\n");
+		return -ENODEV;
+	}
+
+	*ocv_uv = interpolate_var(&the_battery->profile[table_index],
+				batt_temp, soc * 100);
+	*ocv_uv = DECIUV_TO_UV(*ocv_uv);
+	*ocv_uv = CAP(QG_MIN_OCV_UV, QG_MAX_OCV_UV, *ocv_uv);
+
+	return 0;
+}
+#endif
+
 int qg_get_nominal_capacity(u32 *nom_cap_uah, int batt_temp, bool charging)
 {
 	u8 table_index = charging ? TABLE_FCC1 : TABLE_FCC2;
