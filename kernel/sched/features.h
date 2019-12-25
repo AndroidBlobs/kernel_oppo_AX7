@@ -70,7 +70,11 @@ SCHED_FEAT(RT_PUSH_IPI, true)
 #endif
 
 SCHED_FEAT(FORCE_SD_OVERLAP, false)
+#ifndef VENDOR_EDIT //yunqing.zeng@BSP.Kernel 2019/05/15 modify for line crash issue(bug#1955293)
 SCHED_FEAT(RT_RUNTIME_SHARE, true)
+#else
+SCHED_FEAT(RT_RUNTIME_SHARE, false)
+#endif
 SCHED_FEAT(LB_MIN, false)
 SCHED_FEAT(ATTACH_AGE_LOAD, true)
 

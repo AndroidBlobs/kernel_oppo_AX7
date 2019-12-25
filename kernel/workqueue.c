@@ -2807,8 +2807,10 @@ static bool start_flush_work(struct work_struct *work, struct wq_barrier *barr)
 			goto already_gone;
 		pwq = worker->current_pwq;
 	}
-
+#ifndef VENDOR_EDIT
+//QiJun.Cao@BSP.Kernel.Stablity,2018-5-14, remover it for spinlock deadlock
 	check_flush_dependency(pwq->wq, work);
+#endif /* VENDOR_EDIT */
 
 	insert_wq_barrier(pwq, barr, work, worker);
 	spin_unlock_irq(&pool->lock);

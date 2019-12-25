@@ -69,7 +69,12 @@ static void spin_dump(raw_spinlock_t *lock, const char *msg)
 #ifdef CONFIG_DEBUG_SPINLOCK_BITE_ON_BUG
 	msm_trigger_wdog_bite();
 #elif defined(CONFIG_DEBUG_SPINLOCK_PANIC_ON_BUG)
+#ifdef VENDOR_EDIT
+/*Caoqijun@PSW.BSP.Kernel.Stablity 2018-06-17 modify for user version open CONFIG_DEBUG_SPINLOCK  */
+	//BUG();
+#else
 	BUG();
+#endif  /*VENDOR_EDIT*/
 #endif
 	dump_stack();
 }
@@ -114,7 +119,6 @@ static void __spin_lock_debug(raw_spinlock_t *lock)
 {
 	u64 i;
 	u64 loops = loops_per_jiffy * HZ;
-
 	for (i = 0; i < loops; i++) {
 		if (arch_spin_trylock(&lock->raw_lock))
 			return;
