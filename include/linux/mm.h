@@ -268,6 +268,15 @@ extern unsigned int kobjsize(const void *objp);
 
 /* This mask is used to clear all the VMA flags used by mlock */
 #define VM_LOCKED_CLEAR_MASK	(~(VM_LOCKED | VM_LOCKONFAULT))
+#ifdef CONFIG_ARCH_MSM8953_SOC_SETTINGS
+#define MSM8953_TLMM_START_ADDR      0x01000000
+#define MSM8953_TLMM_END_ADDR (0x01300000 - 1)
+#endif
+
+#ifdef CONFIG_ARCH_MSM8953_SOC_SETTINGS
+#define MSM8953_TLMM_START_ADDR	0x01000000
+#define MSM8953_TLMM_END_ADDR	(0x01300000 - 1)
+#endif
 
 /*
  * mapping from the currently active vm_flags protection bits (the
@@ -284,6 +293,7 @@ extern pgprot_t protection_map[16];
 #define FAULT_FLAG_USER		0x40	/* The fault originated in userspace */
 #define FAULT_FLAG_REMOTE	0x80	/* faulting for non current tsk/mm */
 #define FAULT_FLAG_INSTRUCTION  0x100	/* The fault was during an instruction fetch */
+#define FAULT_FLAG_PREFAULT_OLD 0x200   /* Make faultaround ptes old */
 
 /*
  * vm_fault is filled by the the pagefault handler and passed to the vma's
@@ -322,6 +332,7 @@ struct vm_fault {
 struct fault_env {
 	struct vm_area_struct *vma;	/* Target VMA */
 	unsigned long address;		/* Faulting virtual address */
+	unsigned long fault_address;    /* Saved faulting virtual address */
 	unsigned int flags;		/* FAULT_FLAG_xxx flags */
 	pmd_t *pmd;			/* Pointer to pmd entry matching
 					 * the 'address'
@@ -346,7 +357,7 @@ struct fault_env {
 /*
  * These are the virtual MM functions - opening of an area, closing and
  * unmapping it (needed to keep files on disk up-to-date etc), pointer
- * to the functions called when a no-page or a wp-page exception occurs. 
+ * to the functions called when a no-page or a wp-page exception occurs.
  */
 struct vm_operations_struct {
 	void (*open)(struct vm_area_struct * area);
@@ -2450,6 +2461,8 @@ void __init setup_nr_node_ids(void);
 #else
 static inline void setup_nr_node_ids(void) {}
 #endif
+
+extern int want_old_faultaround_pte;
 
 #ifdef CONFIG_PROCESS_RECLAIM
 struct reclaim_param {

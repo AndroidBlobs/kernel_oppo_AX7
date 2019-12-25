@@ -66,6 +66,12 @@ static inline int request_firmware_nowait(
 	return -EINVAL;
 }
 
+#ifdef VENDOR_EDIT
+//Tong.Han@Bsp.Group.Tp,2017-12-16,Add interface to get proper fw
+int request_firmware_select(const struct firmware **fw, const char *name,
+		     struct device *device);
+#endif/*VENDOR_EDIT*/
+
 static inline void release_firmware(const struct firmware *fw)
 {
 }

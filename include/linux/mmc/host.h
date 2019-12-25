@@ -553,6 +553,10 @@ struct mmc_host {
 
 	struct delayed_work	detect;
 	int			detect_change;	/* card detect flag */
+#ifdef VENDOR_EDIT
+//Lycan.Wang@Prd.BasicDrv, 2014-07-10 Add for retry 5 times when new sdcard init error
+    int detect_change_retry;
+#endif /* VENDOR_EDIT */
 	struct mmc_slot		slot;
 
 	const struct mmc_bus_ops *bus_ops;	/* current bus driver */
@@ -567,6 +571,11 @@ struct mmc_host {
 	struct task_struct	*sdio_irq_thread;
 	bool			sdio_irq_pending;
 	atomic_t		sdio_irq_thread_abort;
+
+#ifdef VENDOR_EDIT
+//yh@bsp, 2015-10-21 Add for special card compatible
+        bool                    card_stuck_in_programing_status;
+#endif /* VENDOR_EDIT */
 
 	mmc_pm_flag_t		pm_flags;	/* requested pm features */
 
@@ -690,7 +699,6 @@ static inline void *mmc_cmdq_private(struct mmc_host *host)
 #define mmc_bus_manual_resume(host) ((host)->bus_resume_flags & \
 				MMC_BUSRESUME_MANUAL_RESUME)
 
-#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
 static inline void mmc_set_bus_resume_policy(struct mmc_host *host, int manual)
 {
 	if (manual)
@@ -698,11 +706,6 @@ static inline void mmc_set_bus_resume_policy(struct mmc_host *host, int manual)
 	else
 		host->bus_resume_flags &= ~MMC_BUSRESUME_MANUAL_RESUME;
 }
-#else
-static inline void mmc_set_bus_resume_policy(struct mmc_host *host, int manual)
-{
-}
-#endif
 
 extern int mmc_resume_bus(struct mmc_host *host);
 

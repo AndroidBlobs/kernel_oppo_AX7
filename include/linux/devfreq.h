@@ -242,6 +242,41 @@ extern void devm_devfreq_unregister_notifier(struct device *dev,
 				unsigned int list);
 extern struct devfreq *devfreq_get_devfreq_by_phandle(struct device *dev,
 						int index);
+#ifdef VENDOR_EDIT
+//cuixiaogang@SRC.hypnus.2018-04-05. add support to set devfreq limit
+extern int devfreq_set_limit(struct devfreq *df, unsigned long min, unsigned long max);
+extern int devfreq_set_governor(struct devfreq *df, const struct devfreq_governor *governor);
+extern struct devfreq_governor *find_devfreq_governor_unlocked(const char *name);
+extern void hypnus_init_devbw_orig_governor(void);
+extern struct devfreq *hypnus_get_devfreq(unsigned int id);
+extern int hypnus_set_devbw_governor(const char *buf);
+extern int set_polling_interval(struct devfreq *df, unsigned int val);
+
+extern int devfreq_get_ctrl(struct devfreq *df);
+extern int devfreq_set_ctrl(struct devfreq *df, int state);
+
+#define extern_devbw_op(gov, attr)	\
+extern int gov##_set_##attr(struct devfreq *df, unsigned int val);	\
+extern unsigned int gov##_get_##attr(struct devfreq *df);
+
+extern_devbw_op(hwmon, guard_band_mbps)
+extern_devbw_op(hwmon, decay_rate)
+extern_devbw_op(hwmon, io_percent)
+extern_devbw_op(hwmon, bw_step)
+extern_devbw_op(hwmon, sample_ms)
+extern_devbw_op(hwmon, up_scale)
+extern_devbw_op(hwmon, up_thres)
+extern_devbw_op(hwmon, down_thres)
+extern_devbw_op(hwmon, down_count)
+extern_devbw_op(hwmon, hist_memory)
+extern_devbw_op(hwmon, hyst_trigger_count)
+extern_devbw_op(hwmon, hyst_length)
+extern_devbw_op(hwmon, idle_mbps)
+extern_devbw_op(memlat, ratio_ceil)
+extern_devbw_op(memlat, stall_floor)
+extern int devfreq_get_limit(struct devfreq *df, unsigned long *min, unsigned long *max);
+extern int devfreq_set_limit(struct devfreq *df, unsigned long min, unsigned long max);
+#endif /*VENDOR_EDIT*/
 
 /**
  * devfreq_update_stats() - update the last_status pointer in struct devfreq
@@ -418,6 +453,79 @@ static inline int devfreq_update_stats(struct devfreq *df)
 {
 	return -EINVAL;
 }
+#ifdef VENDOR_EDIT
+//cuixiaogang@SRC.hypnus.2018-04-05. add support to set devfreq limit
+static inline int devfreq_get_limit(struct devfreq *df, unsigned long *min, unsigned long *max)
+{
+	return -EINVAL;
+}
+
+static inline int devfreq_set_limit(struct devfreq *df, unsigned long min, unsigned long max)
+{
+	return 0;
+}
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT
+//cuixiaogang@SRC.hypnus.2018-04-05. add support to set devfreq limit
+static inline int devfreq_set_limit(struct devfreq *df, unsigned long min, unsigned long max)
+{
+	return 0;
+}
+
+static inline int int devfreq_set_governor(struct devfreq *df,
+		const struct devfreq_governor *governor)
+{
+	return 0;
+}
+
+static inline struct devfreq_governor *find_devfreq_governor_unlocked(const char *name)
+{
+	return NULL;
+}
+
+static inline int hypnus_set_devbw_governor(const char *buf)
+{
+	return 0;
+}
+
+static inline void hypnus_init_devbw_orig_governor(void)
+{
+	return;
+}
+
+static inline int set_polling_interval(struct devfreq *df, unsigned int val)
+{
+	return 0;
+}
+
+#define extern_devbw_op(gov, attr)	\
+static inline int gov##_set_##attr(struct devfreq *df, unsigned int val)	\
+{		\
+	return -EINVAL;			\
+}		\
+static inline unsigned int gov##_get_##attr(struct devfreq *df)	\
+{		\
+	return -EINVAL;			\
+}
+
+extern_devbw_op(hwmon, guard_band_mbps)
+extern_devbw_op(hwmon, decay_rate)
+extern_devbw_op(hwmon, io_percent)
+extern_devbw_op(hwmon, bw_step)
+extern_devbw_op(hwmon, sample_ms)
+extern_devbw_op(hwmon, up_scale)
+extern_devbw_op(hwmon, up_thres)
+extern_devbw_op(hwmon, down_thres)
+extern_devbw_op(hwmon, down_count)
+extern_devbw_op(hwmon, hist_memory)
+extern_devbw_op(hwmon, hyst_trigger_count)
+extern_devbw_op(hwmon, hyst_length)
+extern_devbw_op(hwmon, idle_mbps)
+extern_devbw_op(memlat, ratio_ceil)
+extern_devbw_op(memlat, stall_floor)
+#endif /* VENDOR_EDIT */
+
 #endif /* CONFIG_PM_DEVFREQ */
 
 #endif /* __LINUX_DEVFREQ_H__ */

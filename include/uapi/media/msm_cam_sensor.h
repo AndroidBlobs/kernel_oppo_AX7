@@ -264,6 +264,10 @@ enum eeprom_cfg_type_t {
 	CFG_EEPROM_WRITE_DATA,
 	CFG_EEPROM_GET_MM_INFO,
 	CFG_EEPROM_INIT,
+	#ifdef VENDOR_EDIT
+	/*add by hongbo.dai@Camera 20170503,for advance eeprom probe*/
+	CFG_EEPROM_INIT_ALLDATA,
+	#endif
 };
 
 struct eeprom_get_t {
