@@ -1011,6 +1011,12 @@ void __cfg80211_disconnected(struct net_device *dev, const u8 *ie,
 
 	wdev->current_bss = NULL;
 	wdev->ssid_len = 0;
+	#ifdef VENDOR_EDIT
+	//Xiao.Li@PSW.CN.WiFi.Connect.Select.1411720, 2018/06/09,
+	//Modify for disconnect is triggered by driver instead of app layer, still can check and clear wdev->connect_keys
+	kzfree(wdev->connect_keys);
+	wdev->connect_keys = NULL;
+	#endif /* VENDOR_EDIT */
 	wdev->conn_owner_nlportid = 0;
 	kzfree(wdev->connect_keys);
 	wdev->connect_keys = NULL;
