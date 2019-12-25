@@ -19,6 +19,13 @@
 #include "ext4_jbd2.h"
 #include "ext4.h"
 
+#ifdef VENDOR_EDIT
+/* Hui.Fan@PSW.BSP.Kernel.Security, 2017-10-1
+ * System file cannot be chattr
+ */
+#include <soc/oppo/boot_mode.h>
+#endif /*VENDOR_EDIT*/
+
 /**
  * Swap memory between @a and @b for @len bytes.
  *
@@ -191,7 +198,6 @@ journal_err_out:
 	return err;
 }
 
-#ifdef CONFIG_EXT4_FS_ENCRYPTION
 static int uuid_is_zero(__u8 u[16])
 {
 	int	i;
@@ -201,7 +207,6 @@ static int uuid_is_zero(__u8 u[16])
 			return 0;
 	return 1;
 }
-#endif
 
 static int ext4_ioctl_setflags(struct inode *inode,
 			       unsigned int flags)
@@ -448,6 +453,30 @@ long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return put_user(flags, (int __user *) arg);
 	case EXT4_IOC_SETFLAGS: {
 		int err;
+
+#if defined(VENDOR_EDIT) && defined(OPPO_DISALLOW_KEY_INTERFACES)
+/* Hui.Fan@PSW.BSP.Kernel.Security, 2017-10-1
+ * System file cannot be chattr
+ */
+		if (get_boot_mode() == MSM_BOOT_MODE__NORMAL) {
+			char *fpath, *pathbuf;
+			pathbuf = kmalloc(PATH_MAX, GFP_TEMPORARY);
+			if (!pathbuf)
+				return -ENOMEM;
+			fpath = file_path(filp, pathbuf, PATH_MAX);
+			if (IS_ERR(fpath)) {
+				kfree(pathbuf);
+				return -EFAULT;
+			}
+			if (!strncmp(fpath, "/system", 7) || !strncmp(fpath, "/vendor", 7)) {
+				printk(KERN_ERR "[OPPO]IOC_SETFLAGS on file %s \
+is not permitted\n", fpath);
+				kfree(pathbuf);
+				return -EPERM;
+			}
+			kfree(pathbuf);
+		}
+#endif /* VENDOR_EDIT */
 
 		if (!inode_owner_or_capable(inode))
 			return -EACCES;
@@ -772,17 +801,24 @@ resizefs_out:
 	}
 	case EXT4_IOC_PRECACHE_EXTENTS:
 		return ext4_ext_precache(inode);
-
-	case EXT4_IOC_SET_ENCRYPTION_POLICY:
-		return fscrypt_ioctl_set_policy(filp, (const void __user *)arg);
-
-	case EXT4_IOC_GET_ENCRYPTION_PWSALT: {
+	case EXT4_IOC_SET_ENCRYPTION_POLICY: {
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
+		struct fscrypt_policy policy;
+		if (copy_from_user(&policy,
+				   (struct fscrypt_policy __user *)arg,
+				   sizeof(policy)))
+			return -EFAULT;
+		return fscrypt_process_policy(filp, &policy);
+#else
+		return -EOPNOTSUPP;
+#endif
+	}
+	case EXT4_IOC_GET_ENCRYPTION_PWSALT: {
 		int err, err2;
 		struct ext4_sb_info *sbi = EXT4_SB(sb);
 		handle_t *handle;
 
-		if (!ext4_has_feature_encrypt(sb))
+		if (!ext4_sb_has_crypto(sb))
 			return -EOPNOTSUPP;
 		if (uuid_is_zero(sbi->s_es->s_encrypt_pw_salt)) {
 			err = mnt_want_write_file(filp);
@@ -812,18 +848,30 @@ resizefs_out:
 				 sbi->s_es->s_encrypt_pw_salt, 16))
 			return -EFAULT;
 		return 0;
+	}
+	case EXT4_IOC_GET_ENCRYPTION_POLICY: {
+#ifdef CONFIG_EXT4_FS_ENCRYPTION
+		struct fscrypt_policy policy;
+		int err = 0;
+
+		if (!ext4_encrypted_inode(inode))
+			return -ENOENT;
+		err = fscrypt_get_policy(inode, &policy);
+		if (err)
+			return err;
+		if (copy_to_user((void __user *)arg, &policy, sizeof(policy)))
+			return -EFAULT;
+		return 0;
 #else
 		return -EOPNOTSUPP;
 #endif
 	}
-	case EXT4_IOC_GET_ENCRYPTION_POLICY:
-		return fscrypt_ioctl_get_policy(filp, (void __user *)arg);
-
 	case EXT4_IOC_FSGETXATTR:
 	{
 		struct fsxattr fa;
 
 		memset(&fa, 0, sizeof(struct fsxattr));
+		ext4_get_inode_flags(ei);
 		fa.fsx_xflags = ext4_iflags_to_xflags(ei->i_flags & EXT4_FL_USER_VISIBLE);
 
 		if (ext4_has_feature_project(inode->i_sb)) {
