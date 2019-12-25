@@ -259,6 +259,11 @@ void kgsl_pool_free_pages(struct page **pages, unsigned int pcount)
 	if (pages == NULL || pcount == 0)
 		return;
 
+	if(pages[0] == NULL) {
+		pr_info(" %s : *pages==NULL and pcount=%d	\n", __func__,pcount);
+		return;
+	}
+
 	for (i = 0; i < pcount;) {
 		/*
 		 * Free each page or compound page group individually.
