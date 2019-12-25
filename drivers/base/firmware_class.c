@@ -40,6 +40,10 @@ MODULE_DESCRIPTION("Multi purpose firmware loading support");
 MODULE_LICENSE("GPL");
 
 /* Builtin firmware support */
+#ifdef VENDOR_EDIT
+//Tong.Han@Bsp.Group.Tp,2017-12-16,Add interface to get proper fw
+#define FW_OPT_COMPARE (1U << 5)
+#endif/*VENDOR_EDIT*/
 
 #ifdef CONFIG_FW_LOADER
 
@@ -297,7 +301,8 @@ static const char * const fw_path[] = {
 	"/lib/firmware/updates/" UTS_RELEASE,
 	"/lib/firmware/updates",
 	"/lib/firmware/" UTS_RELEASE,
-	"/lib/firmware"
+	"/lib/firmware",
+	"/vendor/firmware"
 };
 
 /*
@@ -932,7 +937,10 @@ static int _request_firmware_load(struct firmware_priv *fw_priv,
 	int retval = 0;
 	struct device *f_dev = &fw_priv->dev;
 	struct firmware_buf *buf = fw_priv->buf;
-
+    #ifdef VENDOR_EDIT
+	//Tong.Han@Bsp.Group.Tp,2017-12-16,Add interface to get proper fw
+	char *envp[2]={"FwUp=compare", NULL};
+	#endif/*VENDOR_EDIT*/
 	/* fall back on userspace loading */
 	if (!buf->data)
 		buf->is_paged_buf = true;
@@ -953,7 +961,16 @@ static int _request_firmware_load(struct firmware_priv *fw_priv,
 		buf->need_uevent = true;
 		dev_set_uevent_suppress(f_dev, false);
 		dev_dbg(f_dev, "firmware: requesting %s\n", buf->fw_id);
+        #ifdef VENDOR_EDIT
+		//Tong.Han@Bsp.Group.Tp,2017-12-16,Add interface to get proper fw
+		if (opt_flags & FW_OPT_COMPARE) {
+			kobject_uevent_env(&fw_priv->dev.kobj, KOBJ_CHANGE,envp);
+		} else {
+			kobject_uevent(&fw_priv->dev.kobj, KOBJ_ADD);
+		}
+		#else
 		kobject_uevent(&fw_priv->dev.kobj, KOBJ_ADD);
+        #endif/*VENDOR_EDIT*/
 	} else {
 		timeout = MAX_JIFFY_OFFSET;
 	}
@@ -1262,6 +1279,22 @@ int request_firmware_direct(const struct firmware **firmware_p,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(request_firmware_direct);
+
+#ifdef VENDOR_EDIT
+//Tong.Han@Bsp.Group.Tp,2017-12-16,Add interface to get proper fw
+int request_firmware_select(const struct firmware **firmware_p, const char *name,
+		 struct device *device)
+{
+	int ret;
+	printk("%s:%d\n", __func__, __LINE__);
+	/* Need to pin this module until return */
+	__module_get(THIS_MODULE);
+	ret = _request_firmware(firmware_p, name, device, NULL, 0, FW_OPT_UEVENT | FW_OPT_FALLBACK | FW_OPT_COMPARE);
+	module_put(THIS_MODULE);
+	return ret;
+}
+EXPORT_SYMBOL(request_firmware_select);
+#endif/*VENDOR_EDIT*/
 
 /**
  * request_firmware_into_buf - load firmware into a previously allocated buffer
