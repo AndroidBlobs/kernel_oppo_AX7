@@ -18,7 +18,14 @@
 
 #include "mdss_dsi.h"
 #include "mdss_mdp.h"
-#include "mdss_debug.h"
+
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+* add for tp black gesture.
+*/
+extern int lcd_esd_status;
+#endif /* VENDOR_EDIT */
 
 /*
  * mdss_check_te_status() - Check the status of panel for TE based ESD.
@@ -156,7 +163,6 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 		ctl->ops.wait_pingpong(ctl, NULL);
 
 	pr_debug("%s: DSI ctrl wait for ping pong done\n", __func__);
-	MDSS_XLOG(mipi->mode);
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON);
 	ret = ctrl_pdata->check_status(ctrl_pdata);
@@ -185,4 +191,11 @@ sim:
 
 status_dead:
 	mdss_fb_report_panel_dead(pstatus_data->mfd);
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+	* add for tp black gesture.
+	*/
+	lcd_esd_status = 0;
+	#endif /* VENDOR_EDIT */
 }

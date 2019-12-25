@@ -35,6 +35,19 @@
 #include <linux/power_supply.h>
 #include <linux/thermal.h>
 
+#ifdef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018-04-29  Use oppo THERMAL_ID resistance */
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
+#endif
+
+#ifdef VENDOR_EDIT
+/* Yichun.Chen  PSW.BSP.CHG  2018-07-25  check whether bat_therm connect with different resistance */
+#include <soc/oppo/oppo_project.h>
+#endif
+
+#define QPNP_VADC_HC_VREF_CODE	0x4000
+
 /* QPNP VADC register definition */
 #define QPNP_VADC_REVISION1				0x0
 #define QPNP_VADC_REVISION2				0x1
@@ -162,10 +175,6 @@
 #define QPNP_VADC_HC1_CONV_TIME_MAX_US				214
 #define QPNP_VADC_HC1_ERR_COUNT					1600
 
-#define QPNP_VADC_CAL_DELAY_CTL_1					0x3744
-#define QPNP_VADC_CAL_DELAY_MEAS_SLOW					0x73
-#define QPNP_VADC_CAL_DELAY_MEAS_DEFAULT				0x3
-
 struct qpnp_vadc_mode_state {
 	bool				meas_int_mode;
 	bool				meas_int_request_in_queue;
@@ -204,6 +213,13 @@ struct qpnp_vadc_chip {
 	bool				vadc_hc;
 	int				vadc_debug_count;
 	struct sensor_device_attribute	sens_attr[0];
+
+#ifdef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018-04-29  Use oppo THERMAL_ID resistance */
+        int                     check_thermal_id_gpio;
+        struct pinctrl          *pinctrl;
+        struct pinctrl_state    *check_thermel_id_default;
+#endif
 };
 
 LIST_HEAD(qpnp_vadc_device_list);
@@ -493,8 +509,7 @@ int32_t qpnp_vadc_hc_read(struct qpnp_vadc_chip *vadc,
 				struct qpnp_vadc_result *result)
 {
 	int rc = 0, scale_type, amux_prescaling, dt_index = 0, calib_type = 0;
-	u8 val = QPNP_VADC_CAL_DELAY_MEAS_SLOW;
-	struct qpnp_adc_amux_properties amux_prop, conv;
+	struct qpnp_adc_amux_properties amux_prop;
 
 	if (qpnp_vadc_is_valid(vadc))
 		return -EPROBE_DEFER;
@@ -530,31 +545,6 @@ int32_t qpnp_vadc_hc_read(struct qpnp_vadc_chip *vadc,
 		goto fail_unlock;
 	}
 
-	if (channel == VADC_USB_IN_V_DIV_16_PM5 &&
-			vadc->adc->adc_prop->is_pmic_5) {
-		rc = regmap_bulk_write(vadc->adc->regmap,
-				QPNP_VADC_CAL_DELAY_CTL_1, &val, 1);
-		if (rc < 0) {
-			pr_err("qpnp adc write cal_delay failed with %d\n", rc);
-			return rc;
-		}
-		msleep(20);
-
-		conv.amux_channel = VADC_VREF_GND;
-		conv.decimation = DECIMATION_TYPE2;
-		conv.mode_sel = ADC_OP_NORMAL_MODE << QPNP_VADC_OP_MODE_SHIFT;
-		conv.hw_settle_time = ADC_CHANNEL_HW_SETTLE_DELAY_0US;
-		conv.fast_avg_setup = ADC_FAST_AVG_SAMPLE_1;
-		conv.cal_val = ADC_HC_ABS_CAL;
-
-		rc = qpnp_vadc_hc_configure(vadc, &conv);
-		if (rc) {
-			pr_err("qpnp_vadc configure failed with %d\n", rc);
-			goto fail_unlock;
-		}
-
-	}
-
 	amux_prop.decimation =
 			vadc->adc->adc_channels[dt_index].adc_decimation;
 	amux_prop.calib_type = vadc->adc->adc_channels[dt_index].calib_type;
@@ -588,18 +578,6 @@ int32_t qpnp_vadc_hc_read(struct qpnp_vadc_chip *vadc,
 				goto fail_unlock;
 			}
 			pr_debug("End of conversion status set\n");
-		}
-	}
-
-	val = QPNP_VADC_CAL_DELAY_MEAS_DEFAULT;
-
-	if (channel == VADC_USB_IN_V_DIV_16_PM5 &&
-			vadc->adc->adc_prop->is_pmic_5) {
-		rc = regmap_bulk_write(vadc->adc->regmap,
-				QPNP_VADC_CAL_DELAY_CTL_1, &val, 1);
-		if (rc < 0) {
-			pr_err("qpnp adc write cal_delay failed with %d\n", rc);
-			return rc;
 		}
 	}
 
@@ -2703,7 +2681,36 @@ static int qpnp_vadc_probe(struct platform_device *pdev)
 	if (!strcmp(id->compatible, "qcom,qpnp-vadc-hc")) {
 		vadc->vadc_hc = true;
 		vadc->adc->adc_hc = true;
-	}
+	}                
+
+#ifdef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018/04-29  Use oppo THERMAL_ID resistance */
+        if (get_project() == OPPO_18031 || get_project() == OPPO_18032 || get_project() == OPPO_18301) {
+                rc = of_property_read_u32(node, "check_thermal_id_gpio", &vadc->check_thermal_id_gpio);
+                if (rc < 0) {
+                        dev_err(&pdev->dev, "error!!! unable to parse check_thermal_id_gpio\n");
+                }
+
+                if (gpio_is_valid(vadc->check_thermal_id_gpio) && vadc->check_thermal_id_gpio != 0) {
+                        rc = gpio_request(vadc->check_thermal_id_gpio, "check_thermal_id_gpio");
+                        if (rc) {
+                                dev_err(&pdev->dev, "error!!! unable to request check_thermal_id_gpio\n");
+                        } else {
+                                vadc->pinctrl = devm_pinctrl_get(vadc->dev);
+                                vadc->check_thermel_id_default = pinctrl_lookup_state(vadc->pinctrl,
+                                        "check_thermal_id_gpio_default");
+                                if (IS_ERR_OR_NULL(vadc->check_thermel_id_default)) {
+                                        dev_err(&pdev->dev, "error!!! unable to check pinctrl\n"); 
+                                } else {
+                                        gpio_direction_input(vadc->check_thermal_id_gpio);
+                                        pinctrl_select_state(vadc->pinctrl, vadc->check_thermel_id_default);
+                                }
+                        }
+                } else {
+                        dev_err(&pdev->dev, "error!!! check_thermal_id_gpio is not valid\n");
+                }
+        }
+#endif
 
 	rc = qpnp_adc_get_devicetree_data(pdev, vadc->adc);
 	if (rc) {

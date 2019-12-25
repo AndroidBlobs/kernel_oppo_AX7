@@ -939,6 +939,77 @@ err_out:
 }
 EXPORT_SYMBOL(devfreq_remove_governor);
 
+#ifdef VENDOR_EDIT
+//cuixiaogang@SRC.hypnus.2018.04.28. add hypnus ddr support
+struct devfreq_governor *find_devfreq_governor_unlocked(const char *name)
+{
+	struct devfreq_governor *tmp_governor;
+
+	if (IS_ERR_OR_NULL(name)) {
+		pr_err("DEVFREQ: %s: Invalid parameters\n", __func__);
+		return ERR_PTR(-EINVAL);
+	}
+
+	mutex_lock(&devfreq_list_lock);
+	list_for_each_entry(tmp_governor, &devfreq_governor_list, node) {
+		if (!strncmp(tmp_governor->name, name, DEVFREQ_NAME_LEN)) {
+			mutex_unlock(&devfreq_list_lock);
+			return tmp_governor;
+		}
+	}
+	mutex_unlock(&devfreq_list_lock);
+
+	return ERR_PTR(-ENODEV);
+}
+
+int devfreq_set_governor(struct devfreq *df,
+			const struct devfreq_governor *governor)
+{
+	int ret;
+	const struct devfreq_governor *prev_gov;
+
+	if (!governor || !df->governor) {
+		return -EINVAL;
+	}
+
+	mutex_lock(&devfreq_list_lock);
+	if (df->governor == governor) {
+		ret = 0;
+		goto out;
+	} else if (df->governor->immutable || governor->immutable) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (df->governor) {
+		ret = df->governor->event_handler(df, DEVFREQ_GOV_STOP, NULL);
+		if (ret) {
+			dev_warn(&df->dev, "%s: Governor %s not stopped(%d)\n",
+				 __func__, df->governor->name, ret);
+			goto out;
+		}
+	}
+	prev_gov = df->governor;
+	df->governor = governor;
+	strncpy(df->governor_name, governor->name, DEVFREQ_NAME_LEN);
+	ret = df->governor->event_handler(df, DEVFREQ_GOV_START, NULL);
+	if (ret) {
+		dev_warn(&df->dev, "%s: Governor %s not started(%d)\n",
+			 __func__, df->governor->name, ret);
+		if (prev_gov) {
+			df->governor = prev_gov;
+			strlcpy(df->governor_name, prev_gov->name,
+				DEVFREQ_NAME_LEN);
+			df->governor->event_handler(df, DEVFREQ_GOV_START,
+						    NULL);
+		}
+	}
+out:
+	mutex_unlock(&devfreq_list_lock);
+	return ret;
+}
+#endif /*VENDOR_EDIT*/
+
 static ssize_t governor_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
@@ -1173,6 +1244,79 @@ show_one(max_freq);
 
 static DEVICE_ATTR_RW(min_freq);
 static DEVICE_ATTR_RW(max_freq);
+
+#ifdef VENDOR_EDIT
+//cuixiaogang@SRC.hypnus.2018-04-05. add support to set devfreq limit
+int devfreq_get_limit(struct devfreq *df, unsigned long *min, unsigned long *max)
+{
+	unsigned long chipinfo_min = ~0, chipinfo_max = 0;
+	int idx;
+
+	if (min)
+		*min = 0;
+	if (max)
+		*max = 0;
+
+	if (!df || !df->profile->freq_table) {
+		pr_err("No devfreq or No table\n");
+		return -EINVAL;
+	}
+
+	mutex_lock(&df->lock);
+	for (idx = 0; idx < df->profile->max_state; idx++) {
+		if (chipinfo_min > df->profile->freq_table[idx])
+			chipinfo_min = df->profile->freq_table[idx];
+		if (chipinfo_max < df->profile->freq_table[idx])
+			chipinfo_max = df->profile->freq_table[idx];
+	}
+	mutex_unlock(&df->lock);
+
+	if (min)
+		*min = chipinfo_min;
+	if (max)
+		*max = chipinfo_max;
+	return 0;
+}
+
+int devfreq_set_limit(struct devfreq *df, unsigned long min, unsigned long max)
+{
+	int idx;
+	unsigned long chipinfo_min = ~0, chipinfo_max = 0;
+
+	if (!df || !df->profile->freq_table) {
+		pr_err("No devfreq or No table\n");
+		return -EINVAL;
+	}
+
+	if (chipinfo_min > chipinfo_max) {
+		for (idx = 0; idx < df->profile->max_state; idx++) {
+			if (chipinfo_min > df->profile->freq_table[idx])
+				chipinfo_min = df->profile->freq_table[idx];
+			if (chipinfo_max < df->profile->freq_table[idx])
+				chipinfo_max = df->profile->freq_table[idx];
+		}
+	}
+
+	if (min < chipinfo_min)
+		min = chipinfo_min;
+	if (max > chipinfo_max)
+		max = chipinfo_max;
+
+	if (min > max)
+		max = min;
+
+	pr_debug("min %lu max %lu, chip min %lu chip max %lu\n",
+		min, max, chipinfo_min, chipinfo_max);
+
+	mutex_lock(&df->lock);
+	df->min_freq = min;
+	df->max_freq = max;
+	update_devfreq(df);
+	mutex_unlock(&df->lock);
+	return 0;
+}
+EXPORT_SYMBOL(devfreq_set_limit);
+#endif /* VENDOR_EDIT */
 
 static ssize_t available_frequencies_show(struct device *d,
 					  struct device_attribute *attr,

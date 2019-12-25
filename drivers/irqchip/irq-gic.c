@@ -54,6 +54,7 @@
 
 #ifdef CONFIG_ARM64
 #include <asm/cpufeature.h>
+#include <linux/syscore_ops.h>
 
 static void gic_check_cpu_features(void)
 {
@@ -71,6 +72,7 @@ union gic_base {
 };
 
 struct gic_chip_data {
+	unsigned int irq_offset;
 	struct irq_chip chip;
 	union gic_base dist_base;
 	union gic_base cpu_base;
@@ -90,6 +92,10 @@ struct gic_chip_data {
 	unsigned int gic_irqs;
 #ifdef CONFIG_GIC_NON_BANKED
 	void __iomem *(*get_base)(union gic_base *);
+#endif
+#ifdef CONFIG_PM
+	unsigned int wakeup_irqs[32];
+	unsigned int enabled_irqs[32];
 #endif
 };
 
@@ -124,7 +130,37 @@ static DEFINE_RAW_SPINLOCK(cpu_map_lock);
 static u8 gic_cpu_map[NR_GIC_CPU_IF] __read_mostly;
 
 static struct static_key supports_deactivate = STATIC_KEY_INIT_TRUE;
+#ifdef VENDOR_EDIT
+//Wenxian.zhen@Prd.BaseDrv, 2016/07/19, add for analysis power consumption
+#define WAKEUP_SOURCE_WIFI_TX	177
+#define WAKEUP_SOURCE_WIFI_RX	178
+#define WAKEUP_SOURCE_MODEM_57	57
+#define WAKEUP_SOURCE_MODEM_58	58
+#define WAKEUP_SOURCE_MODEM_IPA	260 //ipa
+#define WAKEUP_SOURCE_AP_RPM	200
+#define WAKEUP_SOURCE_PMIC_ALARM	203
+#define WAKEUP_SOURCE_RTC_INT_NUM	2
+#define WAKEUP_SOURCE_INT_FIRST		1
+#define WAKEUP_SOURCE_INT_SECOND	2
 
+u64	wakeup_source_count_wifi;
+u64	wakeup_source_count_modem;
+//Yongyao.Song@NW.AP.Comm.919039, 2017/01/20,add for modem wake up source
+#define MODEM_WAKEUP_SRC_NUM 3
+#define MODEM_DIAG_WS_INDEX 0
+#define MODEM_IPA_WS_INDEX 1
+#define MODEM_QMI_WS_INDEX 2
+extern int modem_wakeup_src_count[MODEM_WAKEUP_SRC_NUM];
+extern char modem_wakeup_src_string[MODEM_WAKEUP_SRC_NUM][10];
+//Yongyao.Song add end
+extern u64	wakeup_source_count_rtc;
+//Jiemin.Zhu@PSW.AD.Performance.Power.1104067, 2016/05/12, Add for modem wake up source
+//struct work_struct wakeup_reason_work;
+//Jiemin.Zhu add end
+//liuhd@CN.WiFi.Hardware.1202765,2017/12/10,add for the irq of wlan when system wakeuped by wlan
+u16 modem_wakeup_source = 0;
+#define WLAN_WAKEUP_IRQ_NUMBER	67
+#endif //VENDOR_EDIT 
 static struct gic_chip_data gic_data[CONFIG_ARM_GIC_MAX_NR] __read_mostly;
 
 static struct gic_kvm_info gic_v2_kvm_info;
@@ -1237,9 +1273,39 @@ static int __init __gic_init_bases(struct gic_chip_data *gic,
 }
 
 #ifdef CONFIG_PM
+
+
 static int gic_suspend(void)
 {
+
 	return 0;
+}
+
+extern int msm_show_resume_irq_mask;
+
+/*
+ * gic_show_pending_irq - Shows the pending interrupts
+ * Note: Interrupts should be disabled on the cpu from which
+ * this is called to get accurate list of pending interrupts.
+ */
+void gic_show_pending_irq(void)
+{
+	void __iomem *base;
+	unsigned long pending[32];
+	u32 enabled;
+	unsigned int i, j;
+
+	for (i = 0; i < CONFIG_ARM_GIC_MAX_NR; i++) {
+		base = gic_data_dist_base(&gic_data[i]);
+		for (j = 0; j * 32 < gic_data[i].gic_irqs; j++) {
+			enabled = readl_relaxed(base +
+						GIC_DIST_ENABLE_SET + j * 4);
+			pending[j] = readl_relaxed(base +
+						GIC_DIST_PENDING_SET + j * 4);
+			pending[j] &= enabled;
+			pr_err("Pending irqs[%d] %lx\n", j, pending[j]);
+		}
+	}
 }
 
 static void gic_show_resume_irq(struct gic_chip_data *gic)
@@ -1247,11 +1313,18 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 	unsigned int i;
 	u32 enabled;
 	u32 pending[32];
+#ifdef VENDOR_EDIT
+//Wenxian.zhen@Prd.BaseDrv, 2016/07/19, add for analysis power consumption
+	unsigned int int_id_1 = 0;
+	unsigned int int_id_2 = 0;
+	unsigned int int_count = 0;
+#endif //VENDOR_EDIT 	
 	void __iomem *base = gic_data_dist_base(gic);
 
+#if 0
 	if (!msm_show_resume_irq_mask)
 		return;
-
+#endif
 	for (i = 0; i * 32 < gic->gic_irqs; i++) {
 		enabled = readl_relaxed(base + GIC_DIST_ENABLE_CLEAR + i * 4);
 		pending[i] = readl_relaxed(base + GIC_DIST_PENDING_SET + i * 4);
@@ -1271,7 +1344,44 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 			name = desc->action->name;
 
 		pr_warn("%s: %d triggered %s\n", __func__, i, name);
+#ifdef VENDOR_EDIT
+		//liuhd@CN.WiFi.Hardware.1202765,2017/12/10,add for the irq of wlan when system wakeuped by wlan
+		if (irq == WLAN_WAKEUP_IRQ_NUMBER)
+		{
+			pr_warn("triggered by wlan side\n");
+			modem_wakeup_source = 0;
+			//schedule_work(&wakeup_reason_work);
+		}
+//Wenxian.zhen@Prd.BaseDrv, 2016/07/19, add for analysis power consumption
+		if ((WAKEUP_SOURCE_WIFI_TX == i ) || (WAKEUP_SOURCE_WIFI_RX == i ))
+			wakeup_source_count_wifi++;
+		if ((WAKEUP_SOURCE_MODEM_57 == i ) || (WAKEUP_SOURCE_MODEM_58 == i ) || (WAKEUP_SOURCE_MODEM_IPA == i))
+		{
+			wakeup_source_count_modem++;
+			//Yongyao.Song@NW.AP.Comm.919039, 2017/01/20,add for modem wake up source
+			if(WAKEUP_SOURCE_MODEM_57 == i)
+			{
+				modem_wakeup_src_count[MODEM_QMI_WS_INDEX]++;
+			}else if (WAKEUP_SOURCE_MODEM_IPA == i) {
+				modem_wakeup_src_count[MODEM_IPA_WS_INDEX]++;
+				modem_wakeup_source = 1;
+				//schedule_work(&wakeup_reason_work);
+			}
+			//Yongyao.Song add end
+		}
+		int_count++;
+		if (int_count == WAKEUP_SOURCE_INT_FIRST)
+			int_id_1 = i;
+		if (int_count == WAKEUP_SOURCE_INT_SECOND)
+			int_id_2 = i;
+#endif //VENDOR_EDIT 	
 	}
+#ifdef VENDOR_EDIT
+//Wenxian.zhen@Prd.BaseDrv, 2016/07/19, add for analysis power consumption
+	if ((WAKEUP_SOURCE_RTC_INT_NUM == int_count) && (WAKEUP_SOURCE_AP_RPM == int_id_1) && (WAKEUP_SOURCE_PMIC_ALARM == int_id_2))
+		wakeup_source_count_rtc++;
+#endif //VENDOR_EDIT 	
+	
 }
 
 static void gic_resume_one(struct gic_chip_data *gic)
@@ -1493,6 +1603,11 @@ gic_of_init(struct device_node *node, struct device_node *parent)
 		gicv2m_init(&node->fwnode, gic_data[gic_cnt].domain);
 
 	gic_cnt++;
+#ifdef VENDOR_EDIT
+//Wenxian.zhen@Prd.BaseDrv, 2016/07/19, add for analysis power consumption
+		wakeup_source_count_wifi = 0;
+		wakeup_source_count_modem = 0;		
+#endif //VENDOR_EDIT 
 	return 0;
 }
 IRQCHIP_DECLARE(gic_400, "arm,gic-400", gic_of_init);

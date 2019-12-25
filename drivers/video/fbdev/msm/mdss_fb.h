@@ -244,10 +244,6 @@ struct msm_mdp_interface {
 				out = (2 * (v) * (bl_max) + max_bright);\
 				do_div(out, 2 * max_bright);\
 				} while (0)
-#define MDSS_BL_TO_BRIGHT(out, v, bl_max, max_bright) do {\
-				out = ((v) * (max_bright));\
-				do_div(out, bl_max);\
-				} while (0)
 
 struct mdss_fb_file_info {
 	struct file *file;
@@ -312,7 +308,6 @@ struct msm_fb_data_type {
 	u32 calib_mode_bl;
 	u32 ad_bl_level;
 	u64 bl_level;
-	u64 bl_extn_level;
 	u32 bl_scale;
 	u32 bl_min_lvl;
 	u32 unset_bl_level;
@@ -336,6 +331,7 @@ struct msm_fb_data_type {
 
 	/* for non-blocking */
 	struct task_struct *disp_thread;
+
 	atomic_t commits_pending;
 	atomic_t kickoff_pending;
 	wait_queue_head_t commit_wait_q;

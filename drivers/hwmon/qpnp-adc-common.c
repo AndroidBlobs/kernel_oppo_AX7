@@ -30,6 +30,16 @@
 #include <linux/completion.h>
 #include <linux/qpnp/qpnp-adc.h>
 
+#ifdef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018-04-29  Use oppo THERMAL_ID resistance */
+#include <linux/gpio.h>
+#endif
+
+#ifdef VENDOR_EDIT
+/* Yichun.Chen  PSW.BSP.CHG  2018-07-25  check whether bat_therm connect with different resistance */
+#include <soc/oppo/oppo_project.h>
+#endif
+
 #define KELVINMIL_DEGMIL	273160
 #define QPNP_VADC_LDO_VOLTAGE_MIN	1800000
 #define QPNP_VADC_LDO_VOLTAGE_MAX	1800000
@@ -677,6 +687,8 @@ static const struct qpnp_vadc_map_pt adcmap_batt_therm[] = {
 	{124,	980}
 };
 
+#ifndef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018-04-29  Use oppo THERMAL_ID resistance */
 /* Voltage to temperature */
 static const struct qpnp_vadc_map_pt adcmap_batt_therm_qrd[] = {
 	{1840,	-400},
@@ -750,6 +762,122 @@ static const struct qpnp_vadc_map_pt adcmap_batt_therm_qrd[] = {
 	{114,	960},
 	{107,	980}
 };
+#else
+/*
+static struct qpnp_vadc_map_pt adcmap_batt_therm_qrd_25c[] = {
+        {1631, 250},
+        {1568, 250},
+        {1496, 250},
+        {1416, 250},
+        {1331, 250},
+        {1241, 250},
+        {1150, 250},
+        {1060, 250},
+        {972,  250},
+        {890,  250},
+        {814,  250},
+        {745,  250},
+        {683,  250},
+        {628,  250},
+        {579,  250},
+        {537,  250},
+        {501,  250},
+        {469,  250},
+        {442,  250},
+        {419,  250},
+        {399,  250},
+        {382,  250},
+        {368,  250},
+        {356,  250},
+        {345,  250},
+        {338,  250},
+        {330,  250},
+        {324,  250},
+        {319,  250},
+        {315,  250},
+        {310,  250},
+        {305,  250},
+        {301,  250},
+        {298,  250}
+};
+*/
+
+static struct qpnp_vadc_map_pt adcmap_batt_therm_qrd_5p1k[] = {
+        {1631, -400},
+        {1568, -350},
+        {1496, -300},
+        {1426, -250},
+        {1330, -200},
+        {1241, -150},
+        {1150, -100},
+        {1059, -50},
+        {972,  0},
+        {890,  50},
+        {814,  100},
+        {745,  150},
+        {683,  200},
+        {628,  250},
+        {579,  300},
+        {537,  350},
+        {501,  400},
+        {469,  450},
+        {442,  500},
+        {419,  550},
+        {399,  600},
+        {382,  650},
+        {368,  700},
+        {356,  750},
+        {345,  800},
+        {336,  850},
+        {328,  900},
+        {322,  950},
+        {316,  1000},
+        {311,  1050},
+        {306,  1100},
+        {302,  1150},
+        {299,  1200},
+        {296,  1250}
+};
+
+/*
+static struct qpnp_vadc_map_pt adcmap_batt_therm_qrd_1k[] = {
+        {1626, -400},
+        {1561, -350},
+        {1485, -300},
+        {1400, -250},
+        {1308, -200},
+        {1210, -150},
+        {1110, -100},
+        {1008, -50},
+        {909,  0},
+        {814,  50},
+        {725,  100},
+        {643,  150},
+        {569,  200},
+        {503,  250},
+        {444,  300},
+        {393,  350},
+        {348,  400},
+        {309,  450},
+        {275,  500},
+        {246,  550},
+        {221,  600},
+        {200,  650},
+        {182,  700},
+        {166,  750},
+        {153,  800},
+        {142,  850},
+        {132,  900},
+        {123,  950},
+        {116,  1000},
+        {109,  1050},
+        {104,  1100},
+        {99,   1150},
+        {95,   1200},
+        {91,   1250}
+};
+*/
+#endif
 
 /* Voltage to temperature */
 static const struct qpnp_vadc_map_pt adcmap_batt_therm_pu30[] = {
@@ -1246,6 +1374,14 @@ int32_t qpnp_adc_batt_therm_qrd(struct qpnp_vadc_chip *chip,
 {
 	int64_t batt_thm_voltage = 0;
 
+#ifdef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018-04-29  Use oppo THERMAL_ID resistance */
+        int table_length = 34;
+        struct qpnp_vadc_map_pt * adcmap_batt_therm_qrd = NULL;
+
+        adcmap_batt_therm_qrd = adcmap_batt_therm_qrd_5p1k;
+#endif
+
 	if (!chan_properties || !chan_properties->offset_gain_numerator ||
 		!chan_properties->offset_gain_denominator || !adc_properties
 		|| !adc_chan_result)
@@ -1260,9 +1396,17 @@ int32_t qpnp_adc_batt_therm_qrd(struct qpnp_vadc_chip *chip,
 							* 1000);
 		batt_thm_voltage = div64_s64(batt_thm_voltage,
 				adc_properties->full_scale_code * 1000);
+
+#ifndef VENDOR_EDIT
+/* Yichun.Chen PSW.BSP.CHG  2018-04-29  Use oppo THERMAL_ID resistance */
 		qpnp_adc_map_voltage_temp(adcmap_batt_therm_qrd,
 			ARRAY_SIZE(adcmap_batt_therm_qrd),
 			batt_thm_voltage, &adc_chan_result->physical);
+#else
+		qpnp_adc_map_voltage_temp(adcmap_batt_therm_qrd,
+			table_length,
+			batt_thm_voltage, &adc_chan_result->physical);
+#endif
 	}
 	return 0;
 }

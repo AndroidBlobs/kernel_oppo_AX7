@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -45,6 +45,27 @@ static struct mdss_dsi_data *mdss_dsi_res;
 #define DSI_ENABLE_PC_LATENCY PM_QOS_DEFAULT_VALUE
 
 static struct pm_qos_request mdss_dsi_pm_qos_request;
+
+#ifdef VENDOR_EDIT
+/*MingQiang.Guo@BSP.TP.Function, 2018/06/14, add for trigger load tp fw by lcd driver after lcd reset*/
+extern void lcd_queue_load_tp_fw(void);
+#endif/*VENDOR_EDIT*/
+
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+* add for tp black gesture.
+*/
+extern int lcd_esd_status;
+extern int tp_gesture_enable_flag(void);
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/25,
+* add for shutdown flag
+*/
+extern int shutdown_flag;
+extern int shutdown_panel;
+extern int g_shutdown;
+#endif /* VENDOR_EDIT */
 
 static void mdss_dsi_pm_qos_add_request(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -271,10 +292,32 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev,
 	return rc;
 }
 
+#ifndef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/25,
+* add for shutdown flag
+*/
 static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 {
+#else
+int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
+{
+#endif /* VENDOR_EDIT */
 	int ret = 0;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/25,
+	* add for shutdown flag
+	*/
+	if (shutdown_panel == 1) {
+		pr_info("%s: panel has shutdown\n", __func__);
+		shutdown_panel = 0;
+		shutdown_flag = 0;
+		goto end;
+	}
+	#endif /* VENDOR_EDIT */
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -294,9 +337,23 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 	if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
 		pr_debug("reset disable: pinctrl not enabled\n");
 
+	#ifndef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+	* add for tp black gesture.
+	*/
 	ret = msm_mdss_enable_vreg(
 		ctrl_pdata->panel_power_data.vreg_config,
 		ctrl_pdata->panel_power_data.num_vreg, 0);
+	#else
+	if ((tp_gesture_enable_flag() == 0) || (lcd_esd_status == 0)
+		|| (shutdown_flag == 1) || (g_shutdown == 1)) {
+		pr_info("%s: power shutdown_flag %d g_shutdown %d\n",__func__,shutdown_flag,g_shutdown);
+		ret = msm_mdss_enable_vreg(
+			ctrl_pdata->panel_power_data.vreg_config,
+			ctrl_pdata->panel_power_data.num_vreg, 0);
+	}
+	#endif /* VENDOR_EDIT */
 	if (ret)
 		pr_err("%s: failed to disable vregs for %s\n",
 			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
@@ -309,6 +366,13 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+	* add for tp black gesture.
+	*/
+	static int power_on = 0;
+	#endif
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -318,9 +382,32 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
+	#ifndef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+	* add for tp black gesture.
+	*/
 	ret = msm_mdss_enable_vreg(
 		ctrl_pdata->panel_power_data.vreg_config,
 		ctrl_pdata->panel_power_data.num_vreg, 1);
+	#else
+	if (!regulator_is_enabled(ctrl_pdata->panel_power_data.vreg_config[3].vreg)) {
+		pr_info("%s: normal power on\n",__func__);
+		ret = msm_mdss_enable_vreg(
+			ctrl_pdata->panel_power_data.vreg_config,
+			ctrl_pdata->panel_power_data.num_vreg, 1);
+	} else {
+		if (power_on == 1) {
+			pr_info("%s: power has on not set\n",__func__);
+		} else {
+			pr_info("%s: set power on\n",__func__);
+			power_on = 1;
+			ret = msm_mdss_enable_vreg(
+				ctrl_pdata->panel_power_data.vreg_config,
+				ctrl_pdata->panel_power_data.num_vreg, 1);
+		}
+	}
+	#endif
 	if (ret) {
 		pr_err("%s: failed to enable vregs for %s\n",
 			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
@@ -1471,6 +1558,13 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 		mdss_dsi_ctrl_setup(ctrl_pdata);
 	}
 	ctrl_pdata->ctrl_state |= CTRL_STATE_DSI_ACTIVE;
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/12,
+	* add for lcd rst before lp11
+	*/
+	oppo_reset_before_lp11(pdata);
+	#endif /*VENDOR_EDIT*/
 
 	/* DSI link clocks need to be on prior to ctrl sw reset */
 	mdss_dsi_clk_ctrl(ctrl_pdata, ctrl_pdata->dsi_clk_handle,
@@ -1486,6 +1580,11 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 			pr_debug("reset enable: pinctrl not enabled\n");
 		mdss_dsi_panel_reset(pdata, 1);
 	}
+
+#ifdef VENDOR_EDIT
+/*MingQiang.Guo@BSP.TP.Function, 2018/06/14, add for trigger load tp fw by lcd driver after lcd reset*/
+	lcd_queue_load_tp_fw();
+#endif/*VENDOR_EDIT*/
 
 	if (mipi->init_delay)
 		usleep_range(mipi->init_delay, mipi->init_delay + 10);
@@ -4082,10 +4181,6 @@ static int mdss_dsi_parse_gpio_params(struct platform_device *ctrl_pdev,
 		"qcom,platform-bklight-en-gpio", 0);
 	if (!gpio_is_valid(ctrl_pdata->bklt_en_gpio))
 		pr_info("%s: bklt_en gpio not specified\n", __func__);
-
-	ctrl_pdata->bklt_en_gpio_invert =
-			of_property_read_bool(ctrl_pdev->dev.of_node,
-				"qcom,platform-bklight-en-gpio-invert");
 
 	ctrl_pdata->rst_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
 			 "qcom,platform-reset-gpio", 0);

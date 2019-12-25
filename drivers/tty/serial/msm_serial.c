@@ -39,6 +39,10 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/wait.h>
+#ifdef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 add for console
+#include <soc/oppo/boot_mode.h>
+#endif /* VENDOR_EDIT */
 
 #define UART_MR1			0x0000
 
@@ -161,6 +165,13 @@
 #define UARTDM_TX_MAX			256   /* in bytes, valid for <= 1p3 */
 #define UARTDM_RX_SIZE			(UART_XMIT_SIZE / 4)
 
+#ifdef VENDOR_EDIT
+/* Jianchao.Shi@BSP.CHG.Basic, 2017/04/10, sjc Add for console */
+static struct pinctrl *serial_pinctrl = NULL;
+static struct pinctrl_state *serial_pinctrl_state_active = NULL;
+static struct pinctrl_state *serial_pinctrl_state_sleep = NULL;
+#endif
+
 enum {
 	UARTDM_1P1 = 1,
 	UARTDM_1P2,
@@ -193,6 +204,24 @@ struct msm_port {
 };
 
 #define UART_TO_MSM(uart_port)	container_of(uart_port, struct msm_port, uart)
+#ifdef VENDOR_EDIT
+//Tong.han@BSP.group.TP, Modify for selct console config for diffrent scene,2015/11/15
+static bool boot_with_console(void)
+{
+#ifdef CONFIG_OPPO_DAILY_BUILD
+	return true;
+#else
+	if(oem_get_uartlog_status() == true)
+		return true;
+
+	if(get_boot_mode() == MSM_BOOT_MODE__FACTORY)
+		return true;
+	else 
+        return false;
+
+#endif /* CONFIG_OPPO_DAILY_BUILD */
+}
+#endif /* VENDOR_EDIT */
 
 static
 void msm_write(struct uart_port *port, unsigned int val, unsigned int off)
@@ -395,22 +424,10 @@ no_rx:
 
 static inline void msm_wait_for_xmitr(struct uart_port *port)
 {
-	u32 count = 500000;
-
 	while (!(msm_read(port, UART_SR) & UART_SR_TX_EMPTY)) {
 		if (msm_read(port, UART_ISR) & UART_ISR_TX_READY)
 			break;
 		udelay(1);
-
-		/* At worst case, it is stuck in this loop for waiting
-		 * TX ready, have a 500ms timeout to avoid stuck here
-		 * and only miss some log to uart.
-		 */
-		if (count-- == 0) {
-			msm_write(port, UART_CR_CMD_RESET_TX, UART_CR);
-			printk_deferred("uart may lost data, resetting TX!\n");
-			break;
-		}
 	}
 	msm_write(port, UART_CR_CMD_RESET_TX_READY, UART_CR);
 }
@@ -1494,7 +1511,13 @@ static int msm_poll_get_char(struct uart_port *port)
 	u32 imr;
 	int c;
 	struct msm_port *msm_port = UART_TO_MSM(port);
-
+	
+#ifdef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 add for console
+	if(boot_with_console() == false) {
+		return 0;
+	}
+#endif /* VENDOR_EDIT */
 	/* Disable all interrupts */
 	imr = msm_read(port, UART_IMR);
 	msm_write(port, 0, UART_IMR);
@@ -1514,6 +1537,13 @@ static void msm_poll_put_char(struct uart_port *port, unsigned char c)
 {
 	u32 imr;
 	struct msm_port *msm_port = UART_TO_MSM(port);
+	
+#ifdef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 add for console
+	if(boot_with_console() == false) {
+		return;
+	}
+#endif /* VENDOR_EDIT */
 
 	/* Disable all interrupts */
 	imr = msm_read(port, UART_IMR);
@@ -1608,6 +1638,12 @@ static void __msm_console_write(struct uart_port *port, const char *s,
 	bool replaced = false;
 	void __iomem *tf;
 
+#ifdef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 add for console
+	if(boot_with_console() == false) {
+		return;
+	}
+#endif /* VENDOR_EDIT */
 	if (is_uartdm)
 		tf = port->membase + UARTDM_TF;
 	else
@@ -1767,6 +1803,17 @@ static struct uart_driver msm_uart_driver = {
 	.cons = MSM_CONSOLE,
 };
 
+#ifdef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/02/24 add for console
+static struct uart_driver msm_uart_driver_no_console = {
+	.owner = THIS_MODULE,
+	.driver_name = "msm_serial",
+	.dev_name = "ttyMSM",
+	.nr = UART_NR,
+	.cons = NULL,
+};
+#endif /* VENDOR_EDIT */
+
 static atomic_t msm_uart_next_id = ATOMIC_INIT(0);
 
 static const struct of_device_id msm_uartdm_table[] = {
@@ -1796,6 +1843,46 @@ static int msm_serial_probe(struct platform_device *pdev)
 	if (unlikely(line < 0 || line >= UART_NR))
 		return -ENXIO;
 
+#ifdef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 modify for console
+	pr_err("%s lfc boot_mode:%d end\n", __func__, get_boot_mode());
+
+	serial_pinctrl = devm_pinctrl_get(&pdev->dev);
+	if (IS_ERR_OR_NULL(serial_pinctrl)) {
+		pr_err("%s lfc get serial pinctrl null\n", __func__);
+	} else {
+		pr_err("%s lfc get serial pinctrl success,boot_mode:%d\n", __func__, get_boot_mode());
+
+		if(boot_with_console() == false) {
+			serial_pinctrl_state_sleep 
+				= pinctrl_lookup_state(serial_pinctrl, "disable");
+			if (IS_ERR_OR_NULL(serial_pinctrl_state_sleep)) {
+				pr_err("%s lfc get serial_pinctrl_state_sleep fail\n", __func__);
+			} else {
+				pr_err("%s lfc get serial_pinctrl_state_sleep success\n", __func__);
+				pinctrl_select_state(serial_pinctrl, serial_pinctrl_state_sleep);
+			}
+		} else {
+			serial_pinctrl_state_active
+				= pinctrl_lookup_state(serial_pinctrl, "default");
+			if (IS_ERR_OR_NULL(serial_pinctrl_state_active)) {
+				pr_err("%s lfc get serial_pinctrl_state_active fail\n", __func__);
+			} else {
+				pr_err("%s lfc get serial_pinctrl_state_active success\n", __func__);
+				pinctrl_select_state(serial_pinctrl, serial_pinctrl_state_active);
+			}
+		}
+		
+	}
+#endif
+
+#ifdef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 modify for console
+	if(boot_with_console() == false) {
+		dev_info(&pdev->dev, "boot with console false\n");
+		return -ENODEV;
+	}
+#endif /* VENDOR_EDIT */
 	dev_info(&pdev->dev, "msm_serial: detected port #%d\n", line);
 
 	port = msm_get_port_from_line(line);
@@ -1833,14 +1920,32 @@ static int msm_serial_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, port);
 
+#ifndef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/02/24 modify for console
 	return uart_add_one_port(&msm_uart_driver, port);
+#else
+	if(boot_with_console() == true) {
+		return uart_add_one_port(&msm_uart_driver, port);
+	} else {
+		return uart_add_one_port(&msm_uart_driver_no_console, port);
+	}
+#endif /* VENDOR_EDIT */
 }
 
 static int msm_serial_remove(struct platform_device *pdev)
 {
 	struct uart_port *port = platform_get_drvdata(pdev);
 
+#ifndef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 modify for console
 	uart_remove_one_port(&msm_uart_driver, port);
+#else
+	if(boot_with_console() == true) {
+		uart_remove_one_port(&msm_uart_driver, port);
+	} else {
+		uart_remove_one_port(&msm_uart_driver_no_console, port);
+	}
+#endif /* VENDOR_EDIT */
 
 	return 0;
 }
@@ -1856,18 +1961,34 @@ MODULE_DEVICE_TABLE(of, msm_match_table);
 static int msm_serial_suspend(struct device *dev)
 {
 	struct uart_port *port = dev_get_drvdata(dev);
-
+	
+#ifndef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 modify for console
 	uart_suspend_port(&msm_uart_driver, port);
-
+#else
+	if(boot_with_console() == true) {
+		uart_suspend_port(&msm_uart_driver, port);
+	} else {
+		uart_suspend_port(&msm_uart_driver_no_console, port);
+	}
+#endif /* VENDOR_EDIT */
 	return 0;
 }
 
 static int msm_serial_resume(struct device *dev)
 {
 	struct uart_port *port = dev_get_drvdata(dev);
-
+	
+#ifndef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 modify for console
 	uart_resume_port(&msm_uart_driver, port);
-
+#else
+	if(boot_with_console() == true) {
+		uart_resume_port(&msm_uart_driver, port);
+	} else {
+		uart_resume_port(&msm_uart_driver_no_console, port);
+	}
+#endif /* VENDOR_EDIT */
 	return 0;
 }
 #endif
@@ -1889,15 +2010,34 @@ static struct platform_driver msm_platform_driver = {
 static int __init msm_serial_init(void)
 {
 	int ret;
-
+	
+#ifndef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 modify for console
 	ret = uart_register_driver(&msm_uart_driver);
+#else
+	if(boot_with_console() == true) {
+		ret = uart_register_driver(&msm_uart_driver);
+	} else {
+		ret = uart_register_driver(&msm_uart_driver_no_console);
+	}
+#endif /* VENDOR_EDIT */
 	if (unlikely(ret))
 		return ret;
 
 	ret = platform_driver_register(&msm_platform_driver);
+#ifndef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 modify for console
 	if (unlikely(ret))
 		uart_unregister_driver(&msm_uart_driver);
-
+#else
+	if (unlikely(ret)) {
+		if(boot_with_console() == true) {
+			uart_unregister_driver(&msm_uart_driver);
+		} else {
+			uart_unregister_driver(&msm_uart_driver_no_console);
+		}
+	}
+#endif /* VENDOR_EDIT */
 	pr_info("msm_serial: driver initialized\n");
 
 	return ret;
@@ -1906,7 +2046,16 @@ static int __init msm_serial_init(void)
 static void __exit msm_serial_exit(void)
 {
 	platform_driver_unregister(&msm_platform_driver);
+#ifndef VENDOR_EDIT
+//Fuchun.Liao@BSP.CHG.Basic 2017/03/11 modify for console
 	uart_unregister_driver(&msm_uart_driver);
+#else
+	if(boot_with_console() == true) {
+		uart_unregister_driver(&msm_uart_driver);
+	} else {
+		uart_unregister_driver(&msm_uart_driver_no_console);
+	}
+#endif /* VENDOR_EDIT */
 }
 
 module_init(msm_serial_init);

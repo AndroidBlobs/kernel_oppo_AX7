@@ -27,14 +27,79 @@
 #ifdef TARGET_HW_MDSS_HDMI
 #include "mdss_dba_utils.h"
 #endif
-#include "mdss_debug.h"
-
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/21,
+* add for lcd driver
+*/
+#include <soc/oppo/device_info.h>
+#include <soc/oppo/oppo_project.h>
+#endif /*VENDOR_EDIT*/
 #define DT_CMD_HDR 6
+#define MIN_REFRESH_RATE 48
 #define DEFAULT_MDP_TRANSFER_TIME 14000
 
 #define VSYNC_DELAY msecs_to_jiffies(17)
 
+#ifdef VENDOR_EDIT
+/* Wenxian.Zhen@PSW.BSP.Power.Basic, 2017-05-20,   add for analysis power consumption*/
+#define LCD_SCREEN_ON 1
+#define LCD_SCREEN_OFF 0
+#define LCD_BACKLIGHT_OFF 0
+extern void wakeup_src_clean(void);
+#endif /* VENDOR_EDIT */
+
+
 DEFINE_LED_TRIGGER(bl_led_trigger);
+
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+* add for lcd driver
+*/
+int reg_init_flag = 0;
+unsigned int set_backlight_byi2c = 1;
+extern int init_lm3697_backlight_reg(void);
+extern void set_lm3697_backlight_gpio(unsigned int value);
+extern int lm3697_lcd_backlight_set_level(unsigned int bl_level);
+extern int set_lm3697_backlight_scale_current(void);
+/* Wenjie.Zhong@PSW.BSP.TP.Function, 2018/9/25, Add for himax TP timing*/
+extern int tp_control_reset_gpio(bool enable);
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+* add for tp black gesture.
+*/
+int lcd_esd_status = 1;
+extern int tp_gesture_enable_flag(void);
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/25,
+* add for shutdown flag
+*/
+extern int shutdown_flag;
+extern int g_shutdown;
+int shutdown_panel = 0;
+extern int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata);
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+* add for silence and sau mode
+*/
+extern int lcd_closebl_flag;
+
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/07/24,
+* add for ilitek delay backlight.
+*/
+static struct work_struct backlight_delay_work;
+static unsigned int backup_backlight;
+static unsigned int is_schedule_delay_work = 1;
+static unsigned int is_delayworksetbl = 1;
+unsigned int is_ilitek_panel = 0;
+static unsigned int is_tp_fw_done = 1;
+static struct completion tp_comp;
+DEFINE_MUTEX(bl_lock);
+
+unsigned int is_himax_panel = 0;
+#endif /*VENDOR_EDIT*/
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -211,16 +276,160 @@ static void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
 
+#ifndef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/11,
+* add for lcd driver
+*/
 static char led_pwm1[2] = {0x51, 0x0};	/* DTYPE_DCS_WRITE1 */
 static struct dsi_cmd_desc backlight_cmd = {
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},
 	led_pwm1
 };
+#else
+static char dcs_set_backlight[] = {0x51, 0x07, 0xFF};
+static struct dsi_cmd_desc dcs_set_backlight_cmd = {
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(dcs_set_backlight)},
+	dcs_set_backlight
+};
+
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/26,
+* add for lcd driver cabc
+*/
+bool flag_lcd_off = false;
+struct mdss_dsi_ctrl_pdata *gl_ctrl_pdata;
+
+static DEFINE_MUTEX(lcd_mutex);
+enum
+{
+	CABC_CLOSE = 0,
+	CABC_UI_MODE,
+	CABC_IMAGE_MODE,
+	CABC_VIDEO_MODE,
+};
+int cabc_mode = CABC_CLOSE;
+
+int set_cabc(int level)
+{
+    int ret = 0;
+
+    mutex_lock(&lcd_mutex);
+
+    if(flag_lcd_off == true)
+    {
+        printk(KERN_INFO "lcd is off,don't allow to set cabc\n");
+        cabc_mode = level;
+        mutex_unlock(&lcd_mutex);
+        return 0;
+    }
+
+    pr_info("%s : cabc mode: %d \n",__func__,level);
+
+    switch (level) {
+        case CABC_CLOSE:
+            mdss_dsi_panel_cmds_send(gl_ctrl_pdata, &gl_ctrl_pdata->cabc_close_cmds, CMD_REQ_COMMIT);
+            break;
+        case CABC_UI_MODE:
+            mdss_dsi_panel_cmds_send(gl_ctrl_pdata, &gl_ctrl_pdata->cabc_ui_mode_cmds, CMD_REQ_COMMIT);
+            break;
+        case CABC_IMAGE_MODE:
+            mdss_dsi_panel_cmds_send(gl_ctrl_pdata, &gl_ctrl_pdata->cabc_image_mode_cmds, CMD_REQ_COMMIT);
+            break;
+        case CABC_VIDEO_MODE:
+            mdss_dsi_panel_cmds_send(gl_ctrl_pdata, &gl_ctrl_pdata->cabc_video_mode_cmds, CMD_REQ_COMMIT);
+            break;
+
+        default:
+            pr_err("%s : Unsupported CABC MODE!\n",__func__);
+            mutex_unlock(&lcd_mutex);
+            return -1;
+    }
+
+    cabc_mode = level;
+
+    mutex_unlock(&lcd_mutex);
+    return ret;
+}
+
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/11/20,
+* add for lsi tp watchdog state change
+*/
+int set_lsi_tp_watchdog_state(int state)
+{
+	int ret = 0;
+
+	if (!(gl_ctrl_pdata->lsi_tp_watchdog_on_cmds.cmd_cnt
+		&& gl_ctrl_pdata->lsi_tp_watchdog_off_cmds.cmd_cnt)) {
+		pr_info("%s no needed\n",__func__);
+		return ret;
+	}
+
+	mutex_lock(&lcd_mutex);
+
+	if (flag_lcd_off == true) {
+		printk(KERN_INFO "lcd is off,don't allow to set lsi tp watchdog state\n");
+		mutex_unlock(&lcd_mutex);
+		return ret;
+	}
+
+	pr_info("%s state: %d \n",__func__,state);
+
+	if (state == 1) {
+		mdss_dsi_panel_cmds_send(gl_ctrl_pdata, &gl_ctrl_pdata->lsi_tp_watchdog_on_cmds, CMD_REQ_COMMIT);
+	} else if (state == 0) {
+		mdss_dsi_panel_cmds_send(gl_ctrl_pdata, &gl_ctrl_pdata->lsi_tp_watchdog_off_cmds, CMD_REQ_COMMIT);
+	}
+
+	mutex_unlock(&lcd_mutex);
+
+	return ret;
+}
+
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/07/24,
+* add for ilitek delay backlight.
+*/
+static void delay_backlight_work_func( struct work_struct *work )
+{
+	pr_err("%s: level = %d\n", __func__, backup_backlight);
+
+	if (is_tp_fw_done == 0) {
+		init_completion(&tp_comp);
+		wait_for_completion_killable_timeout(&tp_comp,msecs_to_jiffies(200));
+	}
+
+	usleep_range(50 * 1000,50 * 1000);
+	if (!flag_lcd_off) {
+		mutex_lock(&bl_lock);
+		lm3697_lcd_backlight_set_level(backup_backlight);
+		mutex_unlock(&bl_lock);
+	}
+
+	is_delayworksetbl = 1;
+	is_schedule_delay_work = 0;
+}
+
+void set_tp_fw_done(void) {
+	pr_err("%s ----\n", __func__);
+	is_tp_fw_done = 1;
+	complete(&tp_comp);
+}
+#endif /*VENDOR_EDIT*/
 
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 {
 	struct dcs_cmd_req cmdreq;
 	struct mdss_panel_info *pinfo;
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/11,
+	* add for lcd driver
+	*/
+	int	BL_MSB = 0;
+	int	BL_LSB = 0;
+	#endif /*VENDOR_EDIT*/
 
 	pinfo = &(ctrl->panel_data.panel_info);
 	if (pinfo->dcs_cmd_by_left) {
@@ -228,21 +437,41 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			return;
 	}
 
+	#ifndef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/11,
+	* add for lcd driver
+	*/
 	pr_debug("%s: level=%d\n", __func__, level);
 
 	led_pwm1[1] = (unsigned char)level;
+	#else
+	pr_info("%s: level=%d\n", __func__, level);
+	if (level <= 2047) {
+		if ((level < 20) && (level != 0)) {
+			level = 20;
+		}
+		BL_MSB = level % 256;
+		BL_LSB = level / 256;
+		dcs_set_backlight[1] = BL_LSB;
+		dcs_set_backlight[2] = BL_MSB;
+	}
+	#endif /*VENDOR_EDIT*/
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
+	#ifndef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/11,
+	* add for lcd driver
+	*/
 	cmdreq.cmds = &backlight_cmd;
+	#else
+	cmdreq.cmds = &dcs_set_backlight_cmd;
+	#endif /*VENDOR_EDIT*/
 	cmdreq.cmds_cnt = 1;
 	cmdreq.flags = CMD_REQ_COMMIT;
 	cmdreq.rlen = 0;
 	cmdreq.cb = NULL;
-
-	if (ctrl->bklt_dcs_op_mode == DSI_HS_MODE)
-		cmdreq.flags |= CMD_REQ_HS_MODE;
-	else
-		cmdreq.flags |= CMD_REQ_LP_MODE;
 
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
@@ -413,12 +642,27 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	pr_debug("%s: enable = %d\n", __func__, enable);
 
 	if (enable) {
+		#ifndef VENDOR_EDIT
+		/*
+		* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/12,
+		* add for lcd rst before lp11
+		*/
 		rc = mdss_dsi_request_gpios(ctrl_pdata);
 		if (rc) {
 			pr_err("gpio request failed\n");
 			return rc;
 		}
+		#endif /*VENDOR_EDIT*/
 		if (!pinfo->cont_splash_enabled) {
+			#ifdef VENDOR_EDIT
+			/*
+			* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+			* add for lcd driver
+			*/
+			if (set_backlight_byi2c == 1) {
+				set_lm3697_backlight_gpio(1);
+			}
+			#endif /*VENDOR_EDIT*/
 			if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 				rc = gpio_direction_output(
 					ctrl_pdata->disp_en_gpio, 1);
@@ -439,6 +683,11 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 				}
 			}
 
+			#ifndef VENDOR_EDIT
+			/*
+			* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/12,
+			* add for lcd rst before lp11
+			*/
 			for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {
 				gpio_set_value((ctrl_pdata->rst_gpio),
 					pdata->panel_info.rst_seq[i]);
@@ -446,16 +695,20 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 					usleep_range((pinfo->rst_seq[i] * 1000),
 					(pinfo->rst_seq[i] * 1000) + 10);
 			}
+			#else
+			usleep_range(3 * 1000,3 * 1000);
+			for (i = 2; i < pdata->panel_info.rst_seq_len; ++i) {
+				gpio_set_value((ctrl_pdata->rst_gpio),
+					pdata->panel_info.rst_seq[i]);
+				if (pdata->panel_info.rst_seq[++i])
+					usleep_range(pinfo->rst_seq[i] * 1000,
+						     pinfo->rst_seq[i] * 1000);
+			}
+			#endif /*VENDOR_EDIT*/
 
 			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio)) {
-
-				if (ctrl_pdata->bklt_en_gpio_invert)
-					rc = gpio_direction_output(
-						ctrl_pdata->bklt_en_gpio, 0);
-				else
-					rc = gpio_direction_output(
-						ctrl_pdata->bklt_en_gpio, 1);
-
+				rc = gpio_direction_output(
+					ctrl_pdata->bklt_en_gpio, 1);
 				if (rc) {
 					pr_err("%s: unable to set dir for bklt gpio\n",
 						__func__);
@@ -486,20 +739,67 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			pr_debug("%s: Reset panel done\n", __func__);
 		}
 	} else {
+		#ifdef VENDOR_EDIT
+		/*
+		* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+		* add for lcd driver
+		*/
+		if (set_backlight_byi2c == 1) {
+			set_lm3697_backlight_gpio(0);
+		}
+
+		/*
+		* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+		* add for tp black gesture.
+		*/
+		if ((tp_gesture_enable_flag() != 0) && (lcd_esd_status == 1)
+			&& (shutdown_flag == 0) && (g_shutdown == 0)) {
+			pr_info("mdss_dsi_panel_reset: synaptics black tp on, keep lcd power on\n");
+			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
+				gpio_free(ctrl_pdata->bklt_en_gpio);
+
+			if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
+				gpio_free(ctrl_pdata->disp_en_gpio);
+
+			gpio_free(ctrl_pdata->rst_gpio);
+
+			if (gpio_is_valid(ctrl_pdata->mode_gpio))
+				gpio_free(ctrl_pdata->mode_gpio);
+			return 0;
+		}
+		#endif /*VENDOR_EDIT*/
 		if (gpio_is_valid(ctrl_pdata->bklt_en_gpio)) {
-
-			if (ctrl_pdata->bklt_en_gpio_invert)
-				gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
-			else
-				gpio_set_value((ctrl_pdata->bklt_en_gpio), 0);
-
+			gpio_set_value((ctrl_pdata->bklt_en_gpio), 0);
 			gpio_free(ctrl_pdata->bklt_en_gpio);
 		}
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
+		#ifndef VENDOR_EDIT
+		/*
+		* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+		* add for lcd driver
+		*/
 		gpio_set_value((ctrl_pdata->rst_gpio), 0);
+		#else
+		if (shutdown_flag == 1) {
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+			shutdown_panel = 1;
+			pr_info("%s: panel shutdown_flag\n",__func__);
+		} else if (g_shutdown == 1) {
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+			pr_info("%s: g_shutdown need reset\n",__func__);
+			if (is_himax_panel == 1) {
+			/* Wenjie.Zhong@PSW.BSP.TP.Function, 2018/9/25, Add for himax TP timing*/
+				mdelay(1);
+				tp_control_reset_gpio(false);
+			}
+		} else if (is_himax_panel == 1) {
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+			pr_info("%s: is_himax_panel need reset\n",__func__);
+		}
+		#endif /*VENDOR_EDIT*/
 		gpio_free(ctrl_pdata->rst_gpio);
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
@@ -508,6 +808,68 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 exit:
 	return rc;
 }
+
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/12,
+* add for lcd rst before lp11
+*/
+int oppo_reset_before_lp11(struct mdss_panel_data *pdata)
+{
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	struct mdss_panel_info *pinfo = NULL;
+	int i, rc = 0;
+
+	if (pdata == NULL) {
+		pr_err("%s: Invalid input data\n", __func__);
+		return -EINVAL;
+	}
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+
+	pinfo = &(ctrl_pdata->panel_data.panel_info);
+
+	if (!gpio_is_valid(ctrl_pdata->rst_gpio)) {
+		pr_debug("%s:%d, reset line not configured\n",__func__, __LINE__);
+		return rc;
+	}
+
+	rc = mdss_dsi_request_gpios(ctrl_pdata);
+	if (rc) {
+		pr_err("gpio request failed\n");
+		return rc;
+	}
+
+	if (pdata->panel_info.rst_seq_len) {
+		rc = gpio_direction_output(ctrl_pdata->rst_gpio,
+			pdata->panel_info.rst_seq[0]);
+		if (rc) {
+			pr_err("%s: unable to set dir for rst gpio\n",__func__);
+			goto exit;
+		}
+	}
+
+	if (is_himax_panel == 1) {
+		gpio_set_value((ctrl_pdata->rst_gpio), pdata->panel_info.rst_seq[0]);
+		if (pdata->panel_info.rst_seq[1]) {
+			usleep_range(pinfo->rst_seq[1] * 1000, pinfo->rst_seq[1] * 1000);
+		}
+	} else {
+		for (i = 2; i < pdata->panel_info.rst_seq_len; ++i) {
+			gpio_set_value((ctrl_pdata->rst_gpio),
+				pdata->panel_info.rst_seq[i]);
+			if (pdata->panel_info.rst_seq[++i])
+				usleep_range(pinfo->rst_seq[i] * 1000,
+					     pinfo->rst_seq[i] * 1000);
+		}
+	}
+
+	pr_debug("%s: done\n", __func__);
+exit:
+	return rc;
+}
+#endif /*VENDOR_EDIT*/
 
 /**
  * mdss_dsi_roi_merge() -  merge two roi into single roi
@@ -805,6 +1167,17 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+	* add for silence and sau mode
+	*/
+	if (lcd_closebl_flag == 1) {
+		pr_info("%s -- MSM_BOOT_MODE__SILENCE\n",__func__);
+		bl_level = 0;
+	}
+	#endif
+
 	/*
 	 * Some backlight controllers specify a minimum duty cycle
 	 * for the backlight brightness. If the brightness is less
@@ -813,6 +1186,55 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 
 	if ((bl_level < pdata->panel_info.bl_min) && (bl_level != 0))
 		bl_level = pdata->panel_info.bl_min;
+
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+	* add for lcd driver
+	*/
+	if (set_backlight_byi2c == 1) {
+#ifdef VENDOR_EDIT
+/* Fuchun.Liao@BSP.CHG.Basic 2017/07/29 add for clean wakupsource count */
+		if(LCD_BACKLIGHT_OFF == bl_level) {
+			wakeup_src_clean();
+		}
+#endif /* VENDOR_EDIT */
+
+		/*
+		* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/07/24,
+		* add for ilitek delay backlight.
+		*/
+		if ((is_ilitek_panel == 1) && (is_delayworksetbl == 0)) {
+			if (bl_level != 0) {
+				backup_backlight = bl_level;
+				if (!is_schedule_delay_work) {
+					schedule_work(&backlight_delay_work);
+					is_schedule_delay_work = 1;
+				}
+				bl_level = 0;
+			}
+		}
+
+		mutex_lock(&bl_lock);
+		lm3697_lcd_backlight_set_level(bl_level);
+		mutex_unlock(&bl_lock);
+		/*
+		* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/25,
+		* add for shutdown flag
+		*/
+		if ((shutdown_flag == 1) && (bl_level == 0)) {
+			disable_esd_thread();
+			mdss_dsi_panel_power_off(pdata);
+		}
+		return;
+	}
+#ifdef VENDOR_EDIT
+/* Wenxian.Zhen@BSP.Power.Basic, 2016/07/19,  add for clean wakupsource count */
+		if(LCD_BACKLIGHT_OFF == bl_level) {
+			wakeup_src_clean();
+		}
+#endif /* VENDOR_EDIT */
+	#endif /*VENDOR_EDIT*/
 
 	switch (ctrl_pdata->bklt_ctrl) {
 	case BL_WLED:
@@ -891,7 +1313,19 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 			goto end;
 	}
 
+	#ifndef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+	* add for lcd driver
+	*/
 	on_cmds = &ctrl->on_cmds;
+	#else
+	if (set_backlight_byi2c == 1) {
+		on_cmds = &ctrl->on_cmds;
+	} else {
+		on_cmds = &ctrl->pwm_on_cmds;
+	}
+	#endif
 
 	if ((pinfo->mipi.dms_mode == DYNAMIC_MODE_SWITCH_IMMEDIATE) &&
 			(pinfo->mipi.boot_mode != pinfo->mipi.mode))
@@ -910,6 +1344,36 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 
 	/* Ensure low persistence mode is set as before */
 	mdss_dsi_panel_apply_display_setting(pdata, pinfo->persist_mode);
+
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+	* add for lcd driver
+	*/
+	if ((reg_init_flag == 1) && (set_backlight_byi2c == 1)) {
+	    init_lm3697_backlight_reg();
+	}
+
+	mutex_lock(&lcd_mutex);
+	flag_lcd_off = false;
+	mutex_unlock(&lcd_mutex);
+
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+	* add for tp black gesture.
+	*/
+	if (lcd_esd_status == 0) {
+		lcd_esd_status = 1;
+		pr_debug("%s: lcd_esd_status=%d\n", __func__, lcd_esd_status);
+	}
+
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/07/24,
+	* add for ilitek delay backlight.
+	*/
+	is_delayworksetbl = 0;
+	is_schedule_delay_work = 0;
+	#endif /*VENDOR_EDIT*/
 
 end:
 	pr_debug("%s:-\n", __func__);
@@ -1007,10 +1471,45 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 			goto end;
 	}
 
+	#ifndef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/07/10,
+	* add for lcd driver
+	*/
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds, CMD_REQ_COMMIT);
+	#else
+	if (tp_gesture_enable_flag() != 0) {
+		if (ctrl->off_gesture_cmds.cmd_cnt) {
+			mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_gesture_cmds, CMD_REQ_COMMIT);
+		} else {
+			if (ctrl->off_cmds.cmd_cnt)
+				mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds, CMD_REQ_COMMIT);
+		}
+	} else {
+		if (ctrl->off_cmds.cmd_cnt)
+			mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds, CMD_REQ_COMMIT);
+	}
+	#endif /*VENDOR_EDIT*/
 
 	mdss_dsi_panel_off_hdmi(ctrl, pinfo);
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+	* add for lcd driver
+	*/
+	mutex_lock(&lcd_mutex);
+	reg_init_flag = 1;
+	flag_lcd_off = true;
+	mutex_unlock(&lcd_mutex);
+
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/07/24,
+	* add for ilitek delay backlight.
+	*/
+	is_tp_fw_done = 0;
+	complete(&tp_comp);
+	#endif /*VENDOR_EDIT*/
 
 end:
 	/* clear idle state */
@@ -1045,48 +1544,6 @@ static int mdss_dsi_panel_low_power_config(struct mdss_panel_data *pdata,
 		mdss_dsi_panel_set_idle_mode(pdata, false);
 	pr_debug("%s:-\n", __func__);
 	return 0;
-}
-
-static void mdss_dsi_parse_mdp_kickoff_threshold(struct device_node *np,
-	struct mdss_panel_info *pinfo)
-{
-	int len, rc;
-	const u32 *src;
-	u32 tmp;
-	u32 max_delay_us;
-
-	pinfo->mdp_koff_thshold = false;
-	src = of_get_property(np, "qcom,mdss-mdp-kickoff-threshold", &len);
-	if (!src || (len == 0))
-		return;
-
-	rc = of_property_read_u32(np, "qcom,mdss-mdp-kickoff-delay", &tmp);
-	if (!rc)
-		pinfo->mdp_koff_delay = tmp;
-	else
-		return;
-
-	if (pinfo->mipi.frame_rate == 0) {
-		pr_err("cannot enable guard window, unexpected panel fps\n");
-		return;
-	}
-
-	pinfo->mdp_koff_thshold_low = be32_to_cpu(src[0]);
-	pinfo->mdp_koff_thshold_high = be32_to_cpu(src[1]);
-	max_delay_us = 1000000 / pinfo->mipi.frame_rate;
-
-	/* enable the feature if threshold is valid */
-	if ((pinfo->mdp_koff_thshold_low < pinfo->mdp_koff_thshold_high) &&
-	   ((pinfo->mdp_koff_delay > 0) ||
-	    (pinfo->mdp_koff_delay < max_delay_us)))
-		pinfo->mdp_koff_thshold = true;
-
-	pr_debug("panel kickoff thshold:[%d, %d] delay:%d (max:%d) enable:%d\n",
-		pinfo->mdp_koff_thshold_low,
-		pinfo->mdp_koff_thshold_high,
-		pinfo->mdp_koff_delay,
-		max_delay_us,
-		pinfo->mdp_koff_thshold);
 }
 
 static void mdss_dsi_parse_trigger(struct device_node *np, char *trigger,
@@ -1629,9 +2086,8 @@ static int mdss_dsi_parse_topology_config(struct device_node *np,
 				goto end;
 			}
 		}
-
-		if (!of_property_read_string(cfg_np, "qcom,split-mode",
-		    &data) && !strcmp(data, "pingpong-split"))
+		rc = of_property_read_string(cfg_np, "qcom,split-mode", &data);
+		if (!rc && !strcmp(data, "pingpong-split"))
 			pinfo->use_pingpong_split = true;
 
 		if (((timing->lm_widths[0]) || (timing->lm_widths[1])) &&
@@ -1743,7 +2199,7 @@ static int mdss_dsi_parse_reset_seq(struct device_node *np,
 
 static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 {
-	int i, j = 0;
+	int i, j;
 	int len = 0, *lenp;
 	int group = 0;
 
@@ -1751,15 +2207,6 @@ static bool mdss_dsi_cmp_panel_reg_v2(struct mdss_dsi_ctrl_pdata *ctrl)
 
 	for (i = 0; i < ctrl->status_cmds.cmd_cnt; i++)
 		len += lenp[i];
-
-	for (i = 0; i < len; i++) {
-		pr_debug("[%i] return:0x%x status:0x%x\n",
-			i, (unsigned int)ctrl->return_buf[i],
-			(unsigned int)ctrl->status_value[j + i]);
-		MDSS_XLOG(ctrl->ndx, ctrl->return_buf[i],
-			ctrl->status_value[j + i]);
-		j += len;
-	}
 
 	for (j = 0; j < ctrl->groups; ++j) {
 		for (i = 0; i < len; ++i) {
@@ -1892,12 +2339,10 @@ static void mdss_dsi_parse_dms_config(struct device_node *np,
 		pr_debug("%s: default dms suspend/resume\n", __func__);
 
 	mdss_dsi_parse_dcs_cmds(np, &ctrl->video2cmd,
-		"qcom,video-to-cmd-mode-switch-commands",
-		"qcom,mode-switch-commands-state");
+		"qcom,video-to-cmd-mode-switch-commands", NULL);
 
 	mdss_dsi_parse_dcs_cmds(np, &ctrl->cmd2video,
-		"qcom,cmd-to-video-mode-switch-commands",
-		"qcom,mode-switch-commands-state");
+		"qcom,cmd-to-video-mode-switch-commands", NULL);
 
 	mdss_dsi_parse_dcs_cmds(np, &ctrl->post_dms_on_cmds,
 		"qcom,mdss-dsi-post-mode-switch-on-command",
@@ -2217,10 +2662,10 @@ static int mdss_dsi_set_refresh_rate_range(struct device_node *pan_node,
 				__func__, __LINE__);
 
 		/*
-		 * If min refresh rate is not specified, set it to the
-		 * default panel refresh rate.
+		 * Since min refresh rate is not specified when dynamic
+		 * fps is enabled, using minimum as 30
 		 */
-		pinfo->min_fps = pinfo->mipi.frame_rate;
+		pinfo->min_fps = MIN_REFRESH_RATE;
 		rc = 0;
 	}
 
@@ -2342,13 +2787,6 @@ int mdss_panel_parse_bl_settings(struct device_node *np,
 			}
 		} else if (!strcmp(data, "bl_ctrl_dcs")) {
 			ctrl_pdata->bklt_ctrl = BL_DCS_CMD;
-			data = of_get_property(np,
-				"qcom,mdss-dsi-bl-dcs-command-state", NULL);
-			if (data && !strcmp(data, "dsi_hs_mode"))
-				ctrl_pdata->bklt_dcs_op_mode = DSI_HS_MODE;
-			else
-				ctrl_pdata->bklt_dcs_op_mode = DSI_LP_MODE;
-
 			pr_debug("%s: Configured DCS_CMD bklt ctrl\n",
 								__func__);
 		}
@@ -2870,8 +3308,6 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	rc = of_property_read_u32(np, "qcom,mdss-mdp-transfer-time-us", &tmp);
 	pinfo->mdp_transfer_time_us = (!rc ? tmp : DEFAULT_MDP_TRANSFER_TIME);
 
-	mdss_dsi_parse_mdp_kickoff_threshold(np, pinfo);
-
 	pinfo->mipi.lp11_init = of_property_read_bool(np,
 					"qcom,mdss-dsi-lp11-init");
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-init-delay-us", &tmp);
@@ -2888,6 +3324,43 @@ static int mdss_panel_parse_dt(struct device_node *np,
 
 	mdss_dsi_parse_reset_seq(np, pinfo->rst_seq, &(pinfo->rst_seq_len),
 		"qcom,mdss-dsi-reset-sequence");
+
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+	* add for lcd driver
+	*/
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->pwm_on_cmds,
+		"qcom,mdss-dsi-pwm-on-command", "qcom,mdss-dsi-on-command-state");
+
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/07/10,
+	* add for lcd driver
+	*/
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->off_gesture_cmds,
+		"qcom,mdss-dsi-off-gesture-command", "qcom,mdss-dsi-off-command-state");
+
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/11/20,
+	* add for lsi tp watchdog state change
+	*/
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->lsi_tp_watchdog_on_cmds,
+		"qcom,mdss-dsi-lsi-tp-watchdog-on-command", "qcom,mdss-dsi-off-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->lsi_tp_watchdog_off_cmds,
+		"qcom,mdss-dsi-lsi-tp-watchdog-off-command", "qcom,mdss-dsi-off-command-state");
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/26,
+	* add for lcd driver cabc
+	*/
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->cabc_close_cmds,
+	    "qcom,mdss-dsi-cabc-off-command", "qcom,mdss-dsi-off-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->cabc_ui_mode_cmds,
+	    "qcom,mdss-dsi-cabc-ui-command", "qcom,mdss-dsi-off-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->cabc_image_mode_cmds,
+	    "qcom,mdss-dsi-cabc-image-command", "qcom,mdss-dsi-off-command-state");
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->cabc_video_mode_cmds,
+	    "qcom,mdss-dsi-cabc-video-command", "qcom,mdss-dsi-off-command-state");
+	#endif /*VENDOR_EDIT*/
 
 	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->off_cmds,
 		"qcom,mdss-dsi-off-command", "qcom,mdss-dsi-off-command-state");
@@ -2936,11 +3409,31 @@ int mdss_dsi_panel_init(struct device_node *node,
 	int rc = 0;
 	static const char *panel_name;
 	struct mdss_panel_info *pinfo;
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/21,
+	* add for lcd driver
+	*/
+	static const char *panel_manufacture;
+	static const char *panel_version;
+	#endif /*VENDOR_EDIT*/
 
 	if (!node || !ctrl_pdata) {
 		pr_err("%s: Invalid arguments\n", __func__);
 		return -ENODEV;
 	}
+
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/26,
+	* add for lcd driver cabc
+	*/
+	gl_ctrl_pdata = ctrl_pdata;
+
+	if (is_project(OPPO_18171) || is_project(OPPO_18172) || is_project(OPPO_18571)) {
+		cabc_mode = CABC_VIDEO_MODE;
+	}
+	#endif /*VENDOR_EDIT*/
 
 	pinfo = &ctrl_pdata->panel_data.panel_info;
 
@@ -2954,6 +3447,40 @@ int mdss_dsi_panel_init(struct device_node *node,
 		pr_info("%s: Panel Name = %s\n", __func__, panel_name);
 		strlcpy(&pinfo->panel_name[0], panel_name, MDSS_MAX_PANEL_LEN);
 	}
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/21,
+	* add for lcd driver
+	*/
+	panel_manufacture = of_get_property(node, "qcom,mdss-dsi-panel-manufacture", NULL);
+	if (!panel_manufacture)
+	    pr_info("%s:%d, panel manufacture not specified\n", __func__, __LINE__);
+	else
+	    pr_info("%s: Panel Manufacture = %s\n", __func__, panel_manufacture);
+	panel_version = of_get_property(node, "qcom,mdss-dsi-panel-version", NULL);
+	if (!panel_version)
+	    pr_info("%s:%d, panel version not specified\n", __func__, __LINE__);
+	else
+	    pr_info("%s: Panel Version = %s\n", __func__, panel_version);
+
+	register_device_proc("lcd", (char *)panel_version, (char *)panel_manufacture);
+
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/07/24,
+	* add for ilitek delay backlight.
+	*/
+	if (!strcmp(panel_name,"innolux ili9881h 720p video mode dsi panel")) {
+		is_ilitek_panel = 1;
+	}
+
+	if (!strcmp(panel_name,"auo hx83112a 720p video mode dsi panel")) {
+		is_himax_panel = 1;
+	}
+
+	INIT_WORK(&backlight_delay_work, delay_backlight_work_func);
+	init_completion(&tp_comp);
+
+	#endif /*VENDOR_EDIT*/
 	rc = mdss_panel_parse_dt(node, ctrl_pdata);
 	if (rc) {
 		pr_err("%s:%d panel dt parse failed\n", __func__, __LINE__);

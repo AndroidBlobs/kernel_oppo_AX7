@@ -298,6 +298,15 @@ int msm_mdss_enable_vreg(struct mdss_vreg *in_vreg, int num_vreg, int enable)
 		}
 	} else {
 		for (i = num_vreg-1; i >= 0; i--) {
+			#ifdef VENDOR_EDIT
+			/*
+			* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/24,
+			* lcd not need suspend vddio
+			*/
+			if (!strcmp(in_vreg[i].vreg_name,"vddio")) {
+				continue;
+			}
+			#endif /* VENDOR_EDIT */
 			if (in_vreg[i].pre_off_sleep)
 				usleep_range((in_vreg[i].pre_off_sleep * 1000),
 					(in_vreg[i].pre_off_sleep * 1000) + 10);

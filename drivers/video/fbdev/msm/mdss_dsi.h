@@ -407,7 +407,7 @@ struct mdss_dsi_ctrl_pdata {
 	int (*cmdlist_commit)(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp);
 	void (*switch_mode)(struct mdss_panel_data *pdata, int mode);
 	struct mdss_panel_data panel_data;
-	unsigned char __iomem *ctrl_base;
+	unsigned char *ctrl_base;
 	struct mdss_io_data ctrl_io;
 	struct mdss_io_data mmss_misc_io;
 	struct mdss_io_data phy_io;
@@ -435,9 +435,7 @@ struct mdss_dsi_ctrl_pdata {
 	int bklt_en_gpio;
 	int mode_gpio;
 	int intf_mux_gpio;
-	bool bklt_en_gpio_invert;
 	int bklt_ctrl;	/* backlight ctrl */
-	enum dsi_ctrl_op_mode bklt_dcs_op_mode; /* backlight dcs ctrl mode */
 	bool pwm_pmi;
 	int pwm_period;
 	int pwm_pmic_gpio;
@@ -468,6 +466,36 @@ struct mdss_dsi_ctrl_pdata {
 	struct mdss_hw *dsi_hw;
 	struct mdss_intf_recovery *recovery;
 	struct mdss_intf_recovery *mdp_callback;
+
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/06,
+	* add for lcd driver
+	*/
+	struct dsi_panel_cmds pwm_on_cmds;
+
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/07/10,
+	* add for lcd driver
+	*/
+	struct dsi_panel_cmds off_gesture_cmds;
+
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/26,
+	* add for lcd driver cabc
+	*/
+	struct dsi_panel_cmds cabc_close_cmds;
+	struct dsi_panel_cmds cabc_ui_mode_cmds;
+	struct dsi_panel_cmds cabc_image_mode_cmds;
+	struct dsi_panel_cmds cabc_video_mode_cmds;
+
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/11/20,
+	* add for lsi tp watchdog state change
+	*/
+	struct dsi_panel_cmds lsi_tp_watchdog_on_cmds;
+	struct dsi_panel_cmds lsi_tp_watchdog_off_cmds;
+	#endif /*VENDOR_EDIT*/
 
 	struct dsi_panel_cmds on_cmds;
 	struct dsi_panel_cmds post_dms_on_cmds;
@@ -634,6 +662,13 @@ int mdss_dsi_pre_clkon_cb(void *priv,
 			  enum mdss_dsi_lclk_type l_type,
 			  enum mdss_dsi_clk_state new_state);
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable);
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/12,
+* add for lcd rst before lp11
+*/
+int oppo_reset_before_lp11(struct mdss_panel_data *pdata);
+#endif /* VENDOR_EDIT */
 void mdss_dsi_phy_disable(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_cmd_test_pattern(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_video_test_pattern(struct mdss_dsi_ctrl_pdata *ctrl);
@@ -682,7 +717,6 @@ void mdss_dsi_set_reg(struct mdss_dsi_ctrl_pdata *ctrl, int off,
 	u32 mask, u32 val);
 int mdss_dsi_phy_pll_reset_status(struct mdss_dsi_ctrl_pdata *ctrl);
 int mdss_dsi_panel_power_ctrl(struct mdss_panel_data *pdata, int power_state);
-void mdss_dsi_ctrl_phy_reset(struct mdss_dsi_ctrl_pdata *ctrl);
 
 static inline const char *__mdss_dsi_pm_name(enum dsi_pm_type module)
 {

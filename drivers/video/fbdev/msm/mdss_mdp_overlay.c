@@ -2904,7 +2904,6 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 	if (ctl->ops.wait_pingpong && mdp5_data->mdata->serialize_wait4pp)
 		mdss_mdp_display_wait4pingpong(ctl, true);
 
-	mdp5_data->cache_null_commit = list_empty(&mdp5_data->pipes_used);
 	sd_transition_state = mdp5_data->sd_transition_state;
 	if (sd_transition_state != SD_TRANSITION_NONE) {
 		ret = __config_secure_display(mdp5_data);
@@ -2937,7 +2936,6 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 	ATRACE_BEGIN("sspp_programming");
 	ret = __overlay_queue_pipes(mfd);
 	ATRACE_END("sspp_programming");
-
 	mutex_unlock(&mdp5_data->list_lock);
 
 	mdp5_data->kickoff_released = false;
@@ -3866,8 +3864,7 @@ static ssize_t dynamic_fps_sysfs_wta_dfps(struct device *dev,
 	struct mdss_overlay_private *mdp5_data = mfd_to_mdp5_data(mfd);
 	struct dynamic_fps_data data = {0};
 
-	if (!mdp5_data->ctl || !mdss_mdp_ctl_is_power_on(mdp5_data->ctl) ||
-			mdss_panel_is_power_off(mfd->panel_power_state)) {
+	if (!mdp5_data->ctl || !mdss_mdp_ctl_is_power_on(mdp5_data->ctl)) {
 		pr_debug("panel is off\n");
 		return count;
 	}
@@ -5954,6 +5951,12 @@ static int mdss_mdp_overlay_on(struct msm_fb_data_type *mfd)
 			goto end;
 	}
 
+	#ifdef VENDOR_EDIT
+	/* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/27,  Add for FingerPrint Lock slow */
+	mdata = mfd_to_mdata(mfd);
+	mdata->scm_set_allowable = true;
+	#endif
+
 panel_on:
 	if (IS_ERR_VALUE((unsigned long)rc)) {
 		pr_err("Failed to turn on fb%d\n", mfd->index);
@@ -6014,6 +6017,10 @@ static int mdss_mdp_overlay_off(struct msm_fb_data_type *mfd)
 	int need_cleanup;
 	int retire_cnt;
 	bool destroy_ctl = false;
+	#ifdef VENDOR_EDIT
+	/* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/27,  Add for FingerPrint Lock slow */
+	//struct mdss_data_type *mdata = mfd_to_mdata(mfd);
+	#endif
 
 	if (!mfd)
 		return -ENODEV;
@@ -6160,6 +6167,11 @@ ctl_stop:
 		mdss_mdp_wfd_deinit(mdp5_data->wfd);
 		mdp5_data->wfd = NULL;
 	}
+	#ifdef VENDOR_EDIT
+	/* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/27,  Add for FingerPrint Lock slow */
+	//mdata = mfd_to_mdata(mfd);
+	mdata->scm_set_allowable = false;
+	#endif
 
 end:
 	/* Release the last reference to the runtime device */
@@ -6650,6 +6662,10 @@ int mdss_mdp_overlay_init(struct msm_fb_data_type *mfd)
 		mdp5_data->mdata->has_bwc = false;
 
 	mfd->panel_orientation = mfd->panel_info->panel_orientation;
+
+	if ((mfd->panel_info->panel_orientation & MDP_FLIP_LR) &&
+	    (mfd->split_mode == MDP_DUAL_LM_DUAL_DISPLAY))
+		mdp5_data->mixer_swap = true;
 
 	rc = sysfs_create_group(&dev->kobj, &mdp_overlay_sysfs_group);
 	if (rc) {

@@ -38,6 +38,12 @@
 #include <media/radio-iris.h>
 #include <asm/unaligned.h>
 
+#ifdef VENDOR_EDIT
+//Peikun@PPSW.MM.AudioDriver.Codec, 2018/05/09, Add for change rmssiHi
+#include <soc/oppo/oppo_project.h>
+#endif /* VENDOR_EDIT */
+
+
 static unsigned int rds_buf = 100;
 static int oda_agt;
 static int grp_mask;
@@ -5369,6 +5375,41 @@ static int iris_vidioc_querycap(struct file *file, void *priv,
 	return 0;
 }
 
+
+#ifdef VENDOR_EDIT
+//Peikun@PPSW.MM.AudioDriver.Codec, 2018/05/09, Add for change rmssiHi
+static int hci_fm_set_blend_tbl_default(struct radio_hci_dev *hdev, unsigned long param)
+{
+    int retval = 0;
+
+    struct iris_device *radio = video_get_drvdata(video_get_dev());
+    __u8 defRmssi = 0;
+
+    /* See qcom case 02159748
+     * Exsample, if we want to set stereo threshold to 38 dbuv,
+     * 38dbuv=(-107 + 38)=-69dbm, scBlendRmssiHi=256-69, but depend on
+     * actual test, so the value maybe need to adjust.
+     */
+    if (is_project(OPPO_18301) || is_project(OPPO_18571)) {
+        defRmssi = 256 - 63;
+    }
+
+    retval = hci_cmd(HCI_FM_GET_BLND_TBL_CMD, radio->fm_hdev);
+    if (retval < 0) {
+        FMDERR("Failed to get blend table  %d", retval);
+        return -EINVAL;
+    }
+
+    radio->blend_tbl.scBlendSinrHi = 25;
+    radio->blend_tbl.scBlendRmssiHi = defRmssi;
+
+    pr_warning("%s: SinrHi=%d, RmssiHi=%d\n", __func__, radio->blend_tbl.scBlendSinrHi, radio->blend_tbl.scBlendRmssiHi);
+
+    return hci_set_blend_tbl_req(&radio->blend_tbl, radio->fm_hdev);
+}
+#endif /* VENDOR_EDIT */
+
+
 static int initialise_recv(struct iris_device *radio)
 {
 	int retval;
@@ -5411,6 +5452,14 @@ static int initialise_recv(struct iris_device *radio)
 	retval = hci_cmd(HCI_FM_GET_RECV_CONF_CMD, radio->fm_hdev);
 	if (retval < 0)
 		FMDERR("Failed to get the Recv Config\n");
+
+	#ifdef VENDOR_EDIT
+	//Peikun@PPSW.MM.AudioDriver.Codec, 2018/05/09, Add for change rmssiHi
+	/* here configure default Stereo Threshold */
+	retval = hci_fm_set_blend_tbl_default((struct radio_hci_dev *)radio->fm_hdev, (unsigned long)0);
+	if (retval < 0)
+		FMDERR("Failed to configure defuat Stereo Threshold\n");
+	#endif /* VENDOR_EDIT */
 	return retval;
 }
 

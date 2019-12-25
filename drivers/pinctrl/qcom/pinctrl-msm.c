@@ -1539,11 +1539,11 @@ static void msm_pinctrl_resume(void)
 	const char *name = "null";
 	struct msm_pinctrl *pctrl = msm_pinctrl_data;
 
-	if (!msm_show_resume_irq_mask)
-		return;
+	pr_err("-----------------------%s:%d\n", __func__, __LINE__);
 
 	spin_lock_irqsave(&pctrl->lock, flags);
 	for_each_set_bit(i, pctrl->enabled_irqs, pctrl->chip.ngpio) {
+	pr_err("enabled irqs:%d\n", i);
 		g = &pctrl->soc->groups[i];
 		val = readl_relaxed(pctrl->regs + g->intr_status_reg);
 		if (val & BIT(g->intr_status_bit)) {

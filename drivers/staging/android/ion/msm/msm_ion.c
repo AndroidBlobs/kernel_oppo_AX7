@@ -806,7 +806,7 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 			data.flush_data.offset;
 		end = start + data.flush_data.length;
 
-		if (start && check_vaddr_bounds(start, end)) {
+		if (check_vaddr_bounds(start, end)) {
 			pr_err("%s: virtual address %pK is out of bounds\n",
 			       __func__, data.flush_data.vaddr);
 			ret = -EINVAL;
@@ -870,6 +870,16 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 	return 0;
 }
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_ARM64) /* Shiming.Zhang@PSW.BSP.Driver.ION */
+int msm_ion_heap_pages_zero(struct page **pages, int num_pages)
+{
+        int i;
+        for (i = 0; i < num_pages; i ++) {
+                clear_page(page_address(pages[i]));
+        }
+        return 0;
+}
+#else
 #define MAX_VMAP_RETRIES 10
 
 /**
@@ -915,6 +925,7 @@ int msm_ion_heap_pages_zero(struct page **pages, int num_pages)
 
 	return 0;
 }
+#endif
 
 int msm_ion_heap_alloc_pages_mem(struct pages_mem *pages_mem)
 {
@@ -928,6 +939,11 @@ int msm_ion_heap_alloc_pages_mem(struct pages_mem *pages_mem)
 		 * Do fallback to ensure we have a balance between
 		 * performance and availability.
 		 */
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Performance, 2018-08-16, use vmalloc if it is greater than 8K*/
+			pages = vmalloc(page_tbl_size);
+			pages_mem->free_fn = vfree;
+#else
 		pages = kmalloc(page_tbl_size,
 				__GFP_COMP | __GFP_NORETRY |
 				__GFP_NOWARN);
@@ -935,6 +951,7 @@ int msm_ion_heap_alloc_pages_mem(struct pages_mem *pages_mem)
 			pages = vmalloc(page_tbl_size);
 			pages_mem->free_fn = vfree;
 		}
+#endif /*VENDOR_EDIT*/
 	} else {
 		pages = kmalloc(page_tbl_size, GFP_KERNEL);
 	}

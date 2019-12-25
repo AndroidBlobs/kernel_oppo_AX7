@@ -55,6 +55,29 @@
 #include "mdp3_ctrl.h"
 #include "mdss_sync.h"
 
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/28,
+* add for erase power by android
+*/
+#include <soc/oppo/boot_mode.h>
+#include <soc/oppo/oppo_project.h>
+#define OPPO_BOOTUP_DEFAULT_BRIGHTNESS(x) ((200 * (x)) / 255)
+int lcd_closebl_flag = 0;
+int shutdown_flag = 0;
+int g_shutdown = 0;
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT
+/*
+* MingQiang.Guo@PSW.BSP.TP, 2018/08/07,
+* add for ilitek tp deep sleep in ftm mode
+*/
+extern void tp_goto_sleep_ftm(void);
+extern unsigned int is_ilitek_panel;
+extern unsigned int is_himax_panel;
+#endif//VENDOR_EDIT
+
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
 #define MDSS_FB_NUM 3
 #else
@@ -243,11 +266,9 @@ static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 		}
 	} else if (notify == NOTIFY_UPDATE_STOP) {
 		mutex_lock(&mfd->update.lock);
-		if (mfd->update.init_done) {
-			mutex_unlock(&mfd->update.lock);
-			mutex_lock(&mfd->no_update.lock);
+		if (mfd->update.init_done)
 			reinit_completion(&mfd->no_update.comp);
-		} else {
+		else {
 			mutex_unlock(&mfd->update.lock);
 			pr_err("notify update stop called without init\n");
 			return -EINVAL;
@@ -308,23 +329,10 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
 	}
 }
 
-static enum led_brightness mdss_fb_get_bl_brightness(
-	struct led_classdev *led_cdev)
-{
-	struct msm_fb_data_type *mfd = dev_get_drvdata(led_cdev->dev->parent);
-	u64 value;
-
-	MDSS_BL_TO_BRIGHT(value, mfd->bl_level, mfd->panel_info->bl_max,
-			  mfd->panel_info->brightness_max);
-
-	return value;
-}
-
 static struct led_classdev backlight_led = {
 	.name           = "lcd-backlight",
 	.brightness     = MDSS_MAX_BL_BRIGHTNESS / 2,
 	.brightness_set = mdss_fb_set_bl_brightness,
-	.brightness_get = mdss_fb_get_bl_brightness,
 	.max_brightness = MDSS_MAX_BL_BRIGHTNESS,
 };
 
@@ -607,8 +615,7 @@ static ssize_t mdss_fb_get_panel_info(struct device *dev,
 			"white_chromaticity_x=%d\nwhite_chromaticity_y=%d\n"
 			"red_chromaticity_x=%d\nred_chromaticity_y=%d\n"
 			"green_chromaticity_x=%d\ngreen_chromaticity_y=%d\n"
-			"blue_chromaticity_x=%d\nblue_chromaticity_y=%d\n"
-			"panel_orientation=%d\n",
+			"blue_chromaticity_x=%d\nblue_chromaticity_y=%d\n",
 			pinfo->partial_update_enabled,
 			pinfo->roi_alignment.xstart_pix_align,
 			pinfo->roi_alignment.width_pix_align,
@@ -631,8 +638,7 @@ static ssize_t mdss_fb_get_panel_info(struct device *dev,
 			pinfo->hdr_properties.display_primaries[4],
 			pinfo->hdr_properties.display_primaries[5],
 			pinfo->hdr_properties.display_primaries[6],
-			pinfo->hdr_properties.display_primaries[7],
-			pinfo->panel_orientation);
+			pinfo->hdr_properties.display_primaries[7]);
 
 	return ret;
 }
@@ -902,6 +908,92 @@ static ssize_t mdss_fb_get_persist_mode(struct device *dev,
 	return ret;
 }
 
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/26,
+* add for lcd driver
+*/
+extern int set_cabc(int level);
+extern int cabc_mode;
+static ssize_t mdss_get_cabc(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+
+    printk(KERN_INFO "get cabc mode = %d\n",cabc_mode);
+
+    return sprintf(buf, "%d\n", cabc_mode);
+}
+
+static ssize_t mdss_set_cabc(struct device *dev,
+                               struct device_attribute *attr,
+                               const char *buf, size_t count)
+{
+    int level = 0;
+
+    sscanf(buf, "%du", &level);
+    pr_info("%s cabc level = %d\n", __func__, level);
+    if (is_project(OPPO_18171) || is_project(OPPO_18172) || is_project(OPPO_18571)) {
+        set_cabc(level);
+    }
+    return count;
+}
+
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+* add for silence and sau mode
+*/
+static ssize_t mdss_get_closebl_flag(struct device *dev,
+                                struct device_attribute *attr, char *buf)
+{
+    printk(KERN_INFO "get closebl flag = %d\n",lcd_closebl_flag);
+    return sprintf(buf, "%d\n", lcd_closebl_flag);
+}
+
+static ssize_t mdss_set_closebl_flag(struct device *dev,
+                               struct device_attribute *attr,
+                               const char *buf, size_t count)
+{
+    int closebl = 0;
+    sscanf(buf, "%du", &closebl);
+    pr_info("lcd_closebl_flag = %d\n",closebl);
+    if (1 != closebl)
+        lcd_closebl_flag = 0;
+    pr_info("mdss_set_closebl_flag = %d\n",lcd_closebl_flag);
+    return count;
+}
+
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/25,
+* add for shutdown flag
+*/
+static ssize_t mdss_get_shutdownflag(struct device *dev,
+                                struct device_attribute *attr, char *buf)
+{
+    printk(KERN_INFO "get shutdown_flag = %d\n",shutdown_flag);
+    return sprintf(buf, "%d\n", shutdown_flag);
+}
+
+static ssize_t mdss_set_shutdownflag(struct device *dev,
+                               struct device_attribute *attr,
+                               const char *buf, size_t count)
+{
+    int flag = 0;
+    sscanf(buf, "%du", &flag);
+    if (is_project(OPPO_18171) || is_project(OPPO_18172) || is_project(OPPO_18571)) {
+        if (1 == flag) {
+            g_shutdown = 1;
+        }
+        pr_info("g_shutdown = %d\n",g_shutdown);
+    } else {
+        if (1 == flag) {
+            shutdown_flag = 1;
+        }
+        pr_info("shutdown_flag = %d\n",shutdown_flag);
+    }
+    return count;
+}
+#endif
+
 static ssize_t mdss_fb_idle_pc_notify(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -928,8 +1020,25 @@ static DEVICE_ATTR(measured_fps, 0664,
 	mdss_fb_get_fps_info, NULL);
 static DEVICE_ATTR(msm_fb_persist_mode, 0644,
 	mdss_fb_get_persist_mode, mdss_fb_change_persist_mode);
-static DEVICE_ATTR(idle_power_collapse, 0444, mdss_fb_idle_pc_notify, NULL);
 
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/26,
+* add for lcd driver
+*/
+static DEVICE_ATTR(cabc, S_IRUGO|S_IWUSR, mdss_get_cabc, mdss_set_cabc);
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+* add for silence and sau mode
+*/
+static DEVICE_ATTR(closebl, 0664, mdss_get_closebl_flag, mdss_set_closebl_flag);
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/25,
+* add for shutdown flag
+*/
+static DEVICE_ATTR(shutdownflag, 0664, mdss_get_shutdownflag, mdss_set_shutdownflag);
+#endif
+static DEVICE_ATTR(idle_power_collapse, 0444, mdss_fb_idle_pc_notify, NULL);
 static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_msm_fb_type.attr,
 	&dev_attr_msm_fb_split.attr,
@@ -943,6 +1052,23 @@ static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_msm_fb_dfps_mode.attr,
 	&dev_attr_measured_fps.attr,
 	&dev_attr_msm_fb_persist_mode.attr,
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/26,
+	* add for lcd driver
+	*/
+	&dev_attr_cabc.attr,
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+	* add for silence and sau mode
+	*/
+	&dev_attr_closebl.attr,
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/25,
+	* add for shutdown flag
+	*/
+	&dev_attr_shutdownflag.attr,
+	#endif
 	&dev_attr_idle_power_collapse.attr,
 	NULL,
 };
@@ -1187,24 +1313,11 @@ static int mdss_fb_init_panel_modes(struct msm_fb_data_type *mfd,
 		if (pdata->next) {
 			spt = mdss_panel_get_timing_by_name(pdata->next,
 					modedb[i].name);
-			/* for split config, recalculate xres and pixel clock */
-			if (!IS_ERR_OR_NULL(spt)) {
-				unsigned long pclk, h_total, v_total;
+			if (!IS_ERR_OR_NULL(spt))
 				modedb[i].xres += spt->xres;
-				h_total = modedb[i].xres +
-					modedb[i].left_margin +
-					modedb[i].right_margin +
-					modedb[i].hsync_len;
-				v_total = modedb[i].yres +
-					modedb[i].lower_margin +
-					modedb[i].upper_margin +
-					modedb[i].vsync_len;
-				pclk = h_total * v_total * modedb[i].refresh;
-				modedb[i].pixclock = KHZ2PICOS(pclk / 1000);
-			} else {
+			else
 				pr_debug("no matching split config for %s\n",
 						modedb[i].name);
-			}
 
 			/*
 			 * if no panel timing found for current, need to
@@ -1273,11 +1386,26 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	mfd->mdp_fb_page_protection = MDP_FB_PAGE_PROTECTION_WRITECOMBINE;
 
 	mfd->ext_ad_ctrl = -1;
+
+	#ifndef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/30,
+	* modify for lcd happen esd set backlight 127 before set system backlight
+	*/
 	if (mfd->panel_info && mfd->panel_info->brightness_max > 0)
 		MDSS_BRIGHT_TO_BL(mfd->bl_level, backlight_led.brightness,
 		mfd->panel_info->bl_max, mfd->panel_info->brightness_max);
 	else
 		mfd->bl_level = 0;
+	#else
+	if (mfd->panel_info && mfd->panel_info->brightness_max > 0) {
+		MDSS_BRIGHT_TO_BL(mfd->bl_level, backlight_led.brightness,
+		mfd->panel_info->bl_max, mfd->panel_info->brightness_max);
+		mfd->bl_level = OPPO_BOOTUP_DEFAULT_BRIGHTNESS(mfd->panel_info->bl_max);
+	} else {
+		mfd->bl_level = 0;
+	}
+	#endif /*VEDNOR_EDIT*/
 
 	mfd->bl_scale = 1024;
 	mfd->bl_min_lvl = 30;
@@ -1285,7 +1413,6 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	mfd->fb_imgType = MDP_RGBA_8888;
 	mfd->calib_mode_bl = 0;
 	mfd->unset_bl_level = U32_MAX;
-	mfd->bl_extn_level = -1;
 
 	mfd->pdev = pdev;
 
@@ -1386,6 +1513,18 @@ static int mdss_fb_probe(struct platform_device *pdev)
 			pr_err("failed to register input handler\n");
 
 	INIT_DELAYED_WORK(&mfd->idle_notify_work, __mdss_fb_idle_notify_work);
+
+	#ifdef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/05/01,
+	* add for silence and sau mode
+	*/
+	if ((MSM_BOOT_MODE__SILENCE == get_boot_mode())
+		|| (MSM_BOOT_MODE__SAU == get_boot_mode())) {
+		pr_debug("lcd_closebl_flag = 1\n");
+		lcd_closebl_flag = 1;
+	}
+	#endif /* VENDOR_EDIT */
 
 	return rc;
 }
@@ -1862,6 +2001,17 @@ static int mdss_fb_blank_blank(struct msm_fb_data_type *mfd,
 	complete(&mfd->no_update.comp);
 
 	mfd->op_enable = false;
+
+	#ifdef VENDOR_EDIT
+	/*
+	* MingQiang.Guo@PSW.BSP.TP, 2018/06/06,
+	* add for ilitek tp deep sleep in ftm mode
+	*/
+	if (is_ilitek_panel) {
+		tp_goto_sleep_ftm();
+	}
+	#endif//VENDOR_EDIT
+
 	if (mdss_panel_is_power_off(req_power_state)) {
 		/* Stop Display thread */
 		if (mfd->disp_thread)
@@ -2071,7 +2221,10 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 	int ret;
 	struct mdss_panel_data *pdata;
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
-
+	#ifdef VENDOR_EDIT
+	/* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/27,  Add for FingerPrint Lock slow */
+	struct mdss_data_type *mdata;
+	#endif
 	ret = mdss_fb_pan_idle(mfd);
 	if (ret) {
 		pr_warn("mdss_fb_pan_idle for fb%d failed. ret=%d\n",
@@ -2093,6 +2246,12 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 	}
 	pr_debug("mode: %d\n", blank_mode);
 
+	#ifdef VENDOR_EDIT
+	/* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/04/27,  Add for FingerPrint Lock slow */
+	mdata = mfd_to_mdata(mfd);
+	mdata->scm_set_allowable = false;
+	#endif
+
 	pdata = dev_get_platdata(&mfd->pdev->dev);
 
 	if (pdata->panel_info.is_lpm_mode &&
@@ -2104,7 +2263,6 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 	}
 
 	ret = mdss_fb_blank_sub(blank_mode, info, mfd->op_enable);
-	MDSS_XLOG(blank_mode);
 
 end:
 	mutex_unlock(&mfd->mdss_sysfs_lock);
@@ -2862,9 +3020,7 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 		 * enabling ahead of unblank. for some special cases like
 		 * adb shell stop/start.
 		 */
-		mutex_lock(&mfd->bl_lock);
 		mdss_fb_set_backlight(mfd, 0);
-		mutex_unlock(&mfd->bl_lock);
 
 		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, info,
 			mfd->op_enable);
@@ -3461,15 +3617,6 @@ int mdss_fb_atomic_commit(struct fb_info *info,
 	mfd->msm_fb_backup.atomic_commit = true;
 	mfd->msm_fb_backup.disp_commit.l_roi =  commit_v1->left_roi;
 	mfd->msm_fb_backup.disp_commit.r_roi =  commit_v1->right_roi;
-	mfd->msm_fb_backup.disp_commit.flags =  commit_v1->flags;
-	if (commit_v1->flags & MDP_COMMIT_UPDATE_BRIGHTNESS) {
-		MDSS_BRIGHT_TO_BL(mfd->bl_extn_level, commit_v1->bl_level,
-			mfd->panel_info->bl_max,
-			mfd->panel_info->brightness_max);
-		if (!mfd->bl_extn_level && commit_v1->bl_level)
-			mfd->bl_extn_level = 1;
-	} else
-		mfd->bl_extn_level = -1;
 
 	mutex_lock(&mfd->mdp_sync_pt_data.sync_mutex);
 	atomic_inc(&mfd->mdp_sync_pt_data.commit_cnt);
@@ -4559,9 +4706,15 @@ static int mdss_fb_atomic_commit_ioctl(struct fb_info *info,
 		 * In case of an ESD attack, since we early return from the
 		 * commits, we need to signal the outstanding fences.
 		 */
+		//#ifdef VENDOR_EDIT
+		/*
+		* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/06/01,
+		* add for qcom patch case:03493844
+		*/
 		mutex_lock(&mfd->mdp_sync_pt_data.sync_mutex);
 		atomic_inc(&mfd->mdp_sync_pt_data.commit_cnt);
 		mutex_unlock(&mfd->mdp_sync_pt_data.sync_mutex);
+		//#endif
 		mdss_fb_release_fences(mfd);
 		if ((mfd->panel.type == MIPI_CMD_PANEL) &&
 			mfd->mdp.signal_retire_fence && mdp5_data)
@@ -4784,9 +4937,6 @@ static int mdss_fb_mode_switch(struct msm_fb_data_type *mfd, u32 mode)
 
 	if (!mfd || !mfd->panel_info)
 		return -EINVAL;
-
-	/* make sure that we are idle while switching */
-	mdss_fb_wait_for_kickoff(mfd);
 
 	pinfo = mfd->panel_info;
 	if (pinfo->mipi.dms_mode == DYNAMIC_MODE_SWITCH_SUSPEND_RESUME) {
