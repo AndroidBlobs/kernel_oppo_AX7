@@ -34,3 +34,7 @@ obj-$(CONFIG_RMI4_CORE)		+= rmi4/
 obj-$(CONFIG_INPUT_KEYRESET)	+= keyreset.o
 obj-$(CONFIG_INPUT_KEYCOMBO)	+= keycombo.o
 
+#ifdef VENDOR_EDIT
+#Hongdao.yu@BSP.Fingerprint.secure, 2018/05/05 Add for secure common
+obj-y += misc/oppo_fp_drivers/
+#endif /* VENDOR_EDIT */

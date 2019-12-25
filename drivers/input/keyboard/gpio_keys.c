@@ -355,6 +355,18 @@ static struct attribute_group gpio_keys_attr_group = {
 	.attrs = gpio_keys_attrs,
 };
 
+#ifdef VENDOR_EDIT
+static int door_open = 0;
+static int request_dump = 0;
+void remote_request_dump(void)
+{
+	if(door_open) {
+		request_dump = 1;
+	}
+}
+EXPORT_SYMBOL(remote_request_dump);
+#endif
+
 static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 {
 	const struct gpio_keys_button *button = bdata->button;
