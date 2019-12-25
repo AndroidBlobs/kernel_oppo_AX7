@@ -1,25 +1,31 @@
-dts-dirs += al
-dts-dirs += altera
-dts-dirs += amd
-dts-dirs += amlogic
-dts-dirs += apm
-dts-dirs += arm
-dts-dirs += broadcom
-dts-dirs += cavium
-dts-dirs += exynos
-dts-dirs += freescale
-dts-dirs += hisilicon
-dts-dirs += marvell
-dts-dirs += mediatek
-dts-dirs += nvidia
-dts-dirs += qcom
-dts-dirs += renesas
-dts-dirs += rockchip
-dts-dirs += socionext
-dts-dirs += sprd
-dts-dirs += xilinx
-dts-dirs += lg
-dts-dirs += zte
+#ifndef VENDOR_EDIT //Yunqing.Zeng@PSW.BSP.POWER, 2018-04-06, Modify for dts cloning of target project
+#dts-dirs += al
+#dts-dirs += altera
+#dts-dirs += amd
+#dts-dirs += amlogic
+#dts-dirs += apm
+#dts-dirs += arm
+#dts-dirs += broadcom
+#dts-dirs += cavium
+#dts-dirs += exynos
+#dts-dirs += freescale
+#dts-dirs += hisilicon
+#dts-dirs += marvell
+#dts-dirs += mediatek
+#dts-dirs += nvidia
+#dts-dirs += renesas
+#dts-dirs += rockchip
+#dts-dirs += socionext
+#dts-dirs += sprd
+#dts-dirs += xilinx
+#dts-dirs += lg
+#dts-dirs += zte
+#dts-dirs += qcom
+#else
+dts-dirs += 18031
+dts-dirs += 18171
+#endif
+
 
 subdir-y	:= $(dts-dirs)
 

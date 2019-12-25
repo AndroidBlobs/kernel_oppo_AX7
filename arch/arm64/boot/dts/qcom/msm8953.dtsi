@@ -68,7 +68,7 @@
 		other_ext_mem: other_ext_region@0 {
 			compatible = "removed-dma-pool";
 			no-map;
-			reg = <0x0 0x85300000 0x0 0x1500000>;
+			reg = <0x0 0x85b00000 0x0 0xd00000>;
 		};
 
 		modem_mem: modem_region@0 {
@@ -89,12 +89,6 @@
 			reg = <0x0 0x8e700000 0x0 0x700000>;
 		};
 
-		vm_fw_mem: vm_fw_mem@0 {
-			compatible = "removed-dma-pool";
-			no-map;
-			reg = <0x0 0x92a00000 0x0 0x7800000>;
-		};
-
 		venus_mem: venus_region@0 {
 			compatible = "shared-dma-pool";
 			reusable;
@@ -107,7 +101,7 @@
 			compatible = "shared-dma-pool";
 			reusable;
 			alignment = <0 0x400000>;
-			size = <0 0x0b400000>;
+			size = <0 0x09800000>;
 		};
 
 		qseecom_mem: qseecom_region@0 {
@@ -153,7 +147,7 @@
 		dump_mem: mem_dump_region {
 			compatible = "shared-dma-pool";
 			reusable;
-			size = <0x400000>;
+			size = <0 0x2400000>;
 		};
 	};
 
@@ -330,6 +324,19 @@
 		reg-names = "rmtfs";
 		qcom,client-id = <0x00000001>;
 	};
+
+        //#ifdef VENDOR_EDIT
+        //Zhengpeng.Tan@NW.AP.NV.892767, 2016/11/30
+        //#ifdef FEATURE_OPPO_NV_BACKUP
+        //add for creating a shared memory with uio for nv backup and restore
+        qcom,oembackup_sharedmem@0 {
+            compatible = "qcom,sharedmem-uio";
+            reg = <0x0 0x00100000>;
+            reg-names = "oembackup";
+            qcom,client-id = <0x00000004>;
+        };
+        //#endif /* FEATURE_OPPO_NV_BACKUP */
+        //#endif /* VENDOR_EDIT */
 
 	restart@4ab000 {
 		compatible = "qcom,pshold";
@@ -1204,7 +1211,7 @@
 		reg-names = "wdt-base";
 		interrupts = <0 3 0>, <0 4 0>;
 		qcom,bark-time = <11000>;
-		qcom,pet-time = <9360>;
+		qcom,pet-time = <10000>;
 		qcom,ipi-ping;
 		qcom,wakeup-enable;
 		qcom,scandump-size = <0x40000>;
@@ -1426,10 +1433,8 @@
 
 	sdhc_1: sdhci@7824900 {
 		compatible = "qcom,sdhci-msm";
-		reg = <0x7824900 0x500>, <0x7824000 0x800>, <0x7824e00 0x200>,
-			<0x0119d000 0x4>;
-		reg-names = "hc_mem", "core_mem", "cmdq_mem",
-				"tlmm_mem";
+		reg = <0x7824900 0x500>, <0x7824000 0x800>, <0x7824e00 0x200>;
+		reg-names = "hc_mem", "core_mem", "cmdq_mem";
 
 		interrupts = <0 123 0>, <0 138 0>;
 		interrupt-names = "hc_irq", "pwr_irq";

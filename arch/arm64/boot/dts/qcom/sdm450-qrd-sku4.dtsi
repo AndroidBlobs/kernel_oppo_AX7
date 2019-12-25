@@ -29,8 +29,65 @@
 				0x00 0x18>;
 };
 
+&i2c_2 {
+    //ifdef VENDOR_EDIT
+    //shengjun.gou@SWDP.MultiMedia, 2016/09/14  Add for 16027 Lcd backlight i2c
+    ti_lm3697_bl@36 {
+            compatible = "lm3697";
+            reg = <0x36>;
+            ti,bl-enable-gpio = <&tlmm 46 0x00>;
+    };
+    //#endif VENDOR_EDIT
+};
+
 &i2c_3 {
-	status = "disabled";
+    //#ifdef VENDOR_EDIT
+	//MingQiang.Guo@BSP.group 2018-04-07 add for enable i2c_3 for tp
+	status = "okay";
+	nova_nt36525@62 {
+		compatible = "nova-nt36525";
+		reg = <0x62>;
+		status = "okay";
+		chip-name = "NT36525";
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <65 0x2001>;
+		irq-gpio = <&tlmm 65 0x2001>;
+
+		pinctrl-names = "default";
+		//pinctrl-0 = <&tp_irq_pin_default &tp_rst_pin_default>;
+
+		touchpanel,max-num-support = <10>;
+		touchpanel,tx-rx-num = <18 32>;
+		touchpanel,panel-coords = <720 1520>;
+		touchpanel,display-coords = <720 1520>;
+
+		incell_screen;
+		//edge_limit_support;
+		//black_gesture_support;
+		//charger_pump_support;
+		//esd_handle_support;
+		//spurious_fingerprint_support;
+		//lcd_trigger_fp_check;
+		black_gesture_test_support;
+
+		/*
+		*Virtual Key Config:
+		*1:touchpanel,button-type: <virtualkey_type  supportted_button-map>
+		*virtualkey_type:
+		*Type 1: using board_properties
+		*Type 2: using same IC (button zone&& touch zone are seprate)
+		*Type 3: using diffrent IC (button zone&& touch zone are seprate)
+		*Type 4: No need of virtual key process
+		*supportted_button-map:select|menu|home|back
+		*
+		*2:touchpanel,button-map
+		*type (X1,Y1)(X2,Y2)(X3,Y3)(Width_X,Hight_Y)--Only when button-type is 0
+		*/
+
+		touchpanel,button-type = <2 0x05>;
+	};
+    //#endif VENDOR_EDIT	
 };
 
 &int_codec {
@@ -76,7 +133,7 @@
 	qcom,panel-supply-entry@2 {
 		reg = <2>;
 		qcom,supply-name = "lab";
-		qcom,supply-min-voltage = <4600000>;
+		qcom,supply-min-voltage = <6000000>;
 		qcom,supply-max-voltage = <6000000>;
 		qcom,supply-enable-load = <100000>;
 		qcom,supply-disable-load = <100>;
@@ -85,7 +142,7 @@
 	qcom,panel-supply-entry@3 {
 		reg = <3>;
 		qcom,supply-name = "ibb";
-		qcom,supply-min-voltage = <4600000>;
+		qcom,supply-min-voltage = <6000000>;
 		qcom,supply-max-voltage = <6000000>;
 		qcom,supply-enable-load = <100000>;
 		qcom,supply-disable-load = <100>;
@@ -106,7 +163,7 @@
 	ibb-supply = <&lcdb_ncp_vreg>;
 	/delete-property/ vdd-supply;
 
-	qcom,dsi-pref-prim-pan = <&dsi_hx8399c_truly_vid>;
+	qcom,dsi-pref-prim-pan = <&dsi_oppo18031tianma_nt36525_720p_video>;
 	qcom,platform-bklight-en-gpio = <&pm8953_gpios 4 0>;
 	pinctrl-names = "mdss_default", "mdss_sleep";
 	pinctrl-0 = <&mdss_dsi_active &mdss_te_active>;
@@ -119,6 +176,10 @@
 	status = "disabled";
 };
 
+&dsi_oppo18031tianma_nt36525_720p_video {
+	qcom,cont-splash-enabled;
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
+};
 &dsi_hx8399c_truly_vid {
 	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_pwm";
 	qcom,mdss-dsi-bl-pmic-pwm-frequency = <100>;
@@ -177,81 +238,3 @@
 	};
 };
 
-&i2c_2 {
-#include "smb1355.dtsi"
-};
-
-&pmi632_gpios {
-	smb_en {
-		smb_en_default: smb_en_default {
-			pins = "gpio2";
-			function = "func1";
-			output-enable;
-		};
-	};
-
-	pmi632_sense {
-		/* GPIO 7 and 8 are external-sense pins for PMI632 */
-		pmi632_sense_default: pmi632_sense_default {
-			pins = "gpio7", "gpio8";
-			bias-high-impedance;	/* disable the GPIO */
-			bias-disable;		/* no-pull */
-		};
-	};
-
-	pmi632_ctm {
-		/* Disable GPIO1 for h/w base mitigation */
-		pmi632_ctm_default: pmi632_ctm_default {
-			pins = "gpio1";
-			bias-high-impedance;	/* disable the GPIO */
-			bias-disable;		/* no-pull */
-		};
-	};
-};
-
-&tlmm {
-	smb_int_default: smb_int_default {
-		mux {
-			pins = "gpio59";
-			function = "gpio";
-		};
-		config {
-			pins = "gpio59";
-			drive-strength = <2>;
-			bias-pull-up;
-			input-enable;
-		};
-	};
-};
-
-&smb1355_0 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&smb_int_default
-		&smb_en_default &pmi632_sense_default &pmi632_ctm_default>;
-	interrupt-parent = <&tlmm>;
-	interrupts = <59 IRQ_TYPE_LEVEL_LOW>;
-	smb1355_charger_0: qcom,smb1355-charger@1000 {
-		status ="ok";
-		/delete-property/ io-channels;
-		/delete-property/ io-channels-names;
-		qcom,parallel-mode = <1>;
-		qcom,disable-ctm;
-		qcom,hw-die-temp-mitigation;
-	};
-};
-
-&smb1355_1 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&smb_int_default
-		&smb_en_default &pmi632_sense_default &pmi632_ctm_default>;
-	interrupt-parent = <&tlmm>;
-	interrupts = <59 IRQ_TYPE_LEVEL_LOW>;
-	smb1355_charger_1: qcom,smb1355-charger@1000 {
-		status ="ok";
-		/delete-property/ io-channels;
-		/delete-property/ io-channels-names;
-		qcom,parallel-mode = <1>;
-		qcom,disable-ctm;
-		qcom,hw-die-temp-mitigation;
-	};
-};
