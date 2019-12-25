@@ -219,6 +219,7 @@ config NEED_DMA_MAP_STATE
 config NEED_SG_DMA_LENGTH
 	def_bool y
 
+
 config SMP
 	def_bool y
 
@@ -533,6 +534,25 @@ config ARM64_64K_PAGES
 	  with 64K aligned segments.
 
 endchoice
+config ARCH_MSM8953_SOC_SETTINGS
+	bool "Enable MSM8953 SOC settings"
+	depends on ARCH_MSM8953
+	help
+	  Enable MSM8953 SOC related settings, these generic MSM8953
+	  related settings are required for some of CPUSS sub-system
+	  functionality.
+
+	  If you are not sure what to do, select 'N' here.
+
+config ARCH_MSM8953_SOC_SETTINGS
+	bool "Enable MSM8953 SOC settings"
+	depends on ARCH_MSM8953
+	help
+	  Enable MSM8953 SOC related settings, these generic MSM8953
+	  related settings are required for some of CPUSS sub-system
+	  functionality.
+
+	  If you are not sure what to do, select 'N' here.
 
 choice
 	prompt "Virtual address space size"
