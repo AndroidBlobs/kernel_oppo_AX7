@@ -508,11 +508,17 @@ static int smsm_pm_notifier(struct notifier_block *nb,
 {
 	switch (event) {
 	case PM_SUSPEND_PREPARE:
+		#ifndef VENDOR_EDIT
+		//Yan.Chen@BSP.sensor,2018/06/11,move adsp suspend before sys_sync to avoid sensor event interrupt suspend
 		smsm_change_state(SMSM_APPS_STATE, SMSM_PROC_AWAKE, 0);
+		#endif
 		break;
 
 	case PM_POST_SUSPEND:
+		#ifndef VENDOR_EDIT
+		//Yan.Chen@BSP.sensor,2018/06/11,move adsp suspend before sys_sync to avoid sensor event interrupt suspend
 		smsm_change_state(SMSM_APPS_STATE, 0, SMSM_PROC_AWAKE);
+		#endif
 		break;
 	}
 	return NOTIFY_DONE;
