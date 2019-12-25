@@ -887,12 +887,18 @@ int acc_ctrlrequest(struct usb_composite_dev *cdev,
 	u16	w_length = le16_to_cpu(ctrl->wLength);
 	unsigned long flags;
 
-/*
-	printk(KERN_INFO "acc_ctrlrequest "
-			"%02x.%02x v%04x i%04x l%u\n",
-			b_requestType, b_request,
-			w_value, w_index, w_length);
-*/
+        /*
+         * If instance is not created which is the case in power off charging
+         * mode, dev will be NULL. Hence return error if it is the case.
+         */
+        if (!dev)
+                return -ENODEV;
+        /*
+         *      printk(KERN_INFO "acc_ctrlrequest "
+         *                      "%02x.%02x v%04x i%04x l%u\n",
+         *                      b_requestType, b_request,
+         *                      w_value, w_index, w_length);
+         */
 
 	if (b_requestType == (USB_DIR_OUT | USB_TYPE_VENDOR)) {
 		if (b_request == ACCESSORY_START) {
