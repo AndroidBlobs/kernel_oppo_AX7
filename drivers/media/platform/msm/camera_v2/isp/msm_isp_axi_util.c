@@ -3847,7 +3847,12 @@ static int msm_isp_stream_axi_cfg_update(struct vfe_device *vfe_dev,
 
 int msm_isp_update_axi_stream(struct vfe_device *vfe_dev, void *arg)
 {
+	#ifdef VENDOR_EDIT
+	/*wanghaoran add for remosaic isp process at 20180904*/
+	int rc = 0, i, j, k;
+	#else
 	int rc = 0, i;
+	#endif
 	struct msm_vfe_axi_stream *stream_info;
 	struct msm_vfe_axi_stream_update_cmd *update_cmd = arg;
 	struct msm_vfe_axi_stream_cfg_update_info *update_info = NULL;
@@ -4126,8 +4131,18 @@ int msm_isp_update_axi_stream(struct vfe_device *vfe_dev, void *arg)
 			}
 			vfe_idx = msm_isp_get_vfe_idx_for_stream(
 				vfe_dev, stream_info);
-			msm_isp_stream_axi_cfg_update(vfe_dev, stream_info,
-				update_info);
+			#ifdef VENDOR_EDIT
+			/*wanghaoran add for remosaic isp process at 20180904*/
+			for (j = 0; j < stream_info->num_planes; j++) {
+				stream_info->plane_cfg[vfe_idx][j] =
+					update_info->plane_cfg[j];
+				for (k = 0; k < stream_info->num_isp; k++) {
+					vfe_dev = stream_info->vfe_dev[k];
+					vfe_dev->hw_info->vfe_ops.axi_ops.
+						cfg_wm_reg(vfe_dev, stream_info, j);
+				}
+			}
+			#endif
 		}
 		break;
 	}

@@ -767,8 +767,14 @@ static long msm_vfe40_reset_hardware(struct vfe_device *vfe_dev,
 
 
 	if (blocking_call) {
+		#ifndef VENDOR_EDIT
+		/*Jindian.Guan@Camera, 2018/10/26, modify for isp timout*/
 		rc = wait_for_completion_timeout(
 			&vfe_dev->reset_complete, msecs_to_jiffies(50));
+		#else
+		rc = wait_for_completion_timeout(
+			&vfe_dev->reset_complete, msecs_to_jiffies(500));
+		#endif
 	}
 	return rc;
 }
@@ -879,6 +885,8 @@ static void msm_vfe40_cfg_framedrop(struct vfe_device *vfe_dev,
 		msm_camera_io_w(temp | (framedrop_period - 1) << 2,
 		vfe_base + VFE40_WM_BASE(stream_info->wm[vfe_idx][i]) + 0xC);
 	}
+
+	msm_camera_io_w_mb(0x1, vfe_base + 0x378);
 }
 
 static void msm_vfe40_clear_framedrop(struct vfe_device *vfe_dev,

@@ -82,13 +82,9 @@ static void msm_sensor_misc_regulator(
 
 int32_t msm_sensor_free_sensor_data(struct msm_sensor_ctrl_t *s_ctrl)
 {
-	struct msm_camera_sensor_slave_info *slave_info = NULL;
-
 	if (!s_ctrl->pdev && !s_ctrl->sensor_i2c_client->client)
 		return 0;
 	kfree(s_ctrl->sensordata->slave_info);
-	slave_info = s_ctrl->sensordata->cam_slave_info;
-	kfree(slave_info->sensor_id_info.setting.reg_setting);
 	kfree(s_ctrl->sensordata->cam_slave_info);
 	kfree(s_ctrl->sensordata->actuator_info);
 	kfree(s_ctrl->sensordata->power_info.gpio_conf->gpio_num_info);
@@ -241,6 +237,30 @@ static uint16_t msm_sensor_id_by_mask(struct msm_sensor_ctrl_t *s_ctrl,
 	return sensor_id;
 }
 
+#ifdef VENDOR_EDIT
+/*Add by Zhengrong.Zhang@Camera 20160630 for merge basic modification*/
+static int at_msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	if (msm_sensor_power_down(s_ctrl)< 0) {
+		pr_err("%s:%d error \n", __func__,__LINE__);
+		return -1;
+	}
+	s_ctrl->sensor_state = MSM_SENSOR_POWER_DOWN;
+	return 0;
+}
+static int at_msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
+{
+
+	printk("%s sensor is %s\n", __func__,s_ctrl->sensordata->sensor_name);
+
+	if (msm_sensor_power_up(s_ctrl)< 0) {
+		pr_err("%s:%d error \n", __func__,__LINE__);
+		return -1;
+	}
+	s_ctrl->sensor_state = MSM_SENSOR_POWER_UP;
+	return 0;
+}
+#endif
 int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 {
 	int rc = 0;
@@ -263,17 +283,6 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 			__func__, __LINE__, sensor_i2c_client, slave_info,
 			sensor_name);
 		return -EINVAL;
-	}
-
-	if (slave_info->setting && slave_info->setting->size > 0) {
-		rc = s_ctrl->sensor_i2c_client->i2c_func_tbl->
-			i2c_write_table(s_ctrl->sensor_i2c_client,
-			slave_info->setting);
-		if (rc < 0)
-			pr_err("Write array failed prior to probe\n");
-
-	} else {
-		CDBG("No writes needed for this sensor before probe\n");
 	}
 
 	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
@@ -351,6 +360,30 @@ static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 		pr_err("%s s_ctrl NULL\n", __func__);
 		return -EBADF;
 	}
+#ifdef VENDOR_EDIT
+/*Add by Zhengrong.Zhang@Camera 20160630 for merge basic modification*/
+	if (cmd == 0 && arg == NULL) {
+		rc = at_msm_sensor_power_down(s_ctrl);
+		return rc;
+	}
+#ifndef VENDOR_EDIT
+	else if (cmd ==1 && arg == NULL) {
+		rc = at_msm_sensor_power_up(s_ctrl);
+#else  /*add by hongbo.dai@camera 20170325 for AT test*/
+	else if (cmd ==1) {
+		rc = at_msm_sensor_power_up(s_ctrl);
+		if(rc<0){
+			pr_err("%s power up err\n", __func__);
+			return rc;
+		}
+		/*add by hongbo.dai@camera 20170325,return sensor name for AT test*/
+		if(argp!=NULL){
+			memcpy((char *)argp,s_ctrl->sensordata->sensor_name,16);
+			}
+#endif
+		return rc;
+	}
+#endif
 	switch (cmd) {
 	case VIDIOC_MSM_SENSOR_CFG:
 #ifdef CONFIG_COMPAT

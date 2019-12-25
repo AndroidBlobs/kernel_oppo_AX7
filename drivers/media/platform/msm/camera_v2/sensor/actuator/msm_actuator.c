@@ -26,9 +26,20 @@ DEFINE_MSM_MUTEX(msm_actuator_mutex);
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 #endif
 
+#ifndef VENDOR_EDIT
+/*Jindian.Guan@Camera.Drv, 2018/2/3, modify for [tick sound of parking lens]*/
 #define PARK_LENS_LONG_STEP 7
 #define PARK_LENS_MID_STEP 5
 #define PARK_LENS_SMALL_STEP 3
+#else
+#define PARK_LENS_LONG_STEP 4
+#define PARK_LENS_MID_STEP 2
+#define PARK_LENS_SMALL_STEP 1
+#define PARK_LENS_LONG_POS 400
+#define PARK_LENS_MID_POS 140
+#define PARK_LENS_MIN_POS 20
+#endif
+
 #define MAX_QVALUE 4096
 
 static struct v4l2_file_operations msm_actuator_v4l2_subdev_fops;
@@ -842,6 +853,8 @@ static int32_t msm_actuator_park_lens(struct msm_actuator_ctrl_t *a_ctrl)
 		a_ctrl->park_lens.max_step = a_ctrl->max_code_size;
 
 	next_lens_pos = a_ctrl->step_position_table[a_ctrl->curr_step_pos];
+#ifndef VENDOR_EDIT
+/*Jindian.Guan@Camera.Drv, 2018/2/3, modify for [tick sound of parking lens]*/
 	while (next_lens_pos) {
 		/* conditions which help to reduce park lens time */
 		if (next_lens_pos > (a_ctrl->park_lens.max_step *
@@ -885,6 +898,53 @@ static int32_t msm_actuator_park_lens(struct msm_actuator_ctrl_t *a_ctrl)
 		/* Use typical damping time delay to avoid tick sound */
 		usleep_range(10000, 12000);
 	}
+#else
+    while (next_lens_pos) {
+        /* conditions which help to reduce park lens time */
+        if (next_lens_pos > PARK_LENS_LONG_POS && next_lens_pos > (a_ctrl->park_lens.max_step *
+            PARK_LENS_LONG_STEP)) {
+            next_lens_pos = next_lens_pos -
+                (a_ctrl->park_lens.max_step *
+                PARK_LENS_LONG_STEP);
+        } else if (next_lens_pos > PARK_LENS_MID_POS && next_lens_pos > (a_ctrl->park_lens.max_step *
+            PARK_LENS_MID_STEP)) {
+            next_lens_pos = next_lens_pos -
+                (a_ctrl->park_lens.max_step *
+                PARK_LENS_MID_STEP);
+        } else if (next_lens_pos > (a_ctrl->park_lens.max_step *
+            PARK_LENS_SMALL_STEP)) {
+            next_lens_pos = next_lens_pos -
+                (a_ctrl->park_lens.max_step *
+                PARK_LENS_SMALL_STEP);
+        } else {
+            next_lens_pos = (next_lens_pos >
+                a_ctrl->park_lens.max_step) ?
+                (next_lens_pos - a_ctrl->park_lens.
+                max_step) : 0;
+        }
+        a_ctrl->func_tbl->actuator_parse_i2c_params(a_ctrl,
+            next_lens_pos, a_ctrl->park_lens.hw_params,
+            a_ctrl->park_lens.damping_delay);
+
+        reg_setting.reg_setting = a_ctrl->i2c_reg_tbl;
+        reg_setting.size = a_ctrl->i2c_tbl_index;
+        reg_setting.data_type = a_ctrl->i2c_data_type;
+
+        rc = a_ctrl->i2c_client.i2c_func_tbl->
+            i2c_write_table_w_microdelay(
+            &a_ctrl->i2c_client, &reg_setting);
+        if (rc < 0) {
+            pr_err("%s Failed I2C write Line %d\n",
+                __func__, __LINE__);
+            return rc;
+        }
+        a_ctrl->i2c_tbl_index = 0;
+        /* Use typical damping time delay to avoid tick sound */
+        usleep_range(6000, 8000);
+        if (next_lens_pos <= PARK_LENS_MIN_POS)
+            break;
+     }
+#endif
 
 	return 0;
 }
@@ -1122,7 +1182,10 @@ static int32_t msm_actuator_power_down(struct msm_actuator_ctrl_t *a_ctrl)
 	if (a_ctrl->actuator_state != ACT_DISABLE_STATE) {
 
 		if (a_ctrl->func_tbl && a_ctrl->func_tbl->actuator_park_lens) {
+#ifdef VENDOR_EDIT
+			/*deleted by houyujun@Camera 20180418 for af*/
 			rc = a_ctrl->func_tbl->actuator_park_lens(a_ctrl);
+#endif
 			if (rc < 0)
 				pr_err("%s:%d Lens park failed.\n",
 					__func__, __LINE__);
