@@ -22,6 +22,14 @@
 #include "mdss-dsi-pll.h"
 #include "mdss-dsi-pll-8996.h"
 
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/09/06,
+* modify for rf emi case:03630513
+*/
+#include <soc/oppo/oppo_project.h>
+#endif
+
 #define DSI_PLL_POLL_MAX_READS                  15
 #define DSI_PLL_POLL_TIMEOUT_US                 1000
 #define MSM8996_DSI_PLL_REVISION_2		2
@@ -434,8 +442,22 @@ static void mdss_dsi_pll_8996_input_init(struct mdss_pll_resources *pll,
 	pdb->in.pll_lpf_cap1 = 11;	/* 11, reg: 0x0500, bit 0 - 3 */
 	pdb->in.pll_lpf_cap2 = 1;	/* 1, reg: 0x0500, bit 4 - 7 */
 	pdb->in.pll_iptat_trim = 7;
+	#ifndef VENDOR_EDIT
+	/*
+	* Ling.Guo@PSW.MM.Display.LCD.Machine, 2018/09/06,
+	* modify for rf emi case:03630513
+	*/
 	pdb->in.pll_c3ctrl = 2;		/* 2 */
 	pdb->in.pll_r3ctrl = 1;		/* 1 */
+	#else
+	if (is_project(OPPO_18171) || is_project(OPPO_18172) || is_project(OPPO_18571)) {
+		pdb->in.pll_c3ctrl = 0xf;		/* 2 */
+		pdb->in.pll_r3ctrl = 0xf;		/* 1 */
+	} else {
+		pdb->in.pll_c3ctrl = 2;		/* 2 */
+		pdb->in.pll_r3ctrl = 1;		/* 1 */
+	}
+	#endif
 }
 
 static void pll_8996_ssc_calc(struct mdss_pll_resources *pll,
