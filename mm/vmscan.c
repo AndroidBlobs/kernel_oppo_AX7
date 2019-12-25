@@ -87,7 +87,6 @@ struct scan_control {
 	/* The highest zone to isolate pages for reclaim from */
 	enum zone_type reclaim_idx;
 
-	/* Writepage batching in laptop mode; RECLAIM_WRITE */
 	unsigned int may_writepage:1;
 
 	/* Can mapped pages be reclaimed? */
@@ -713,8 +712,15 @@ static int __remove_mapping(struct address_space *mapping, struct page *page,
 		swp_entry_t swap = { .val = page_private(page) };
 		mem_cgroup_swapout(page, swap);
 		__delete_from_swap_cache(page);
-		spin_unlock_irqrestore(&mapping->tree_lock, flags);
-		swapcache_free(swap);
+#ifndef VENDOR_EDIT
+//Caoqijun@BSP.Kernel.Stability.1484958, 2018/07/30, Add qualcomm patch for AudioTrack
+               spin_unlock_irqrestore(&mapping->tree_lock, flags);
+#endif
+               swapcache_free(swap);
+#ifdef VENDOR_EDIT
+//Caoqijun@BSP.Kernel.Stability.1484958, 2018/07/30, Add qualcomm patch for AudioTrack
+               spin_unlock_irqrestore(&mapping->tree_lock, flags);
+#endif
 	} else {
 		void (*freepage)(struct page *);
 		void *shadow = NULL;
@@ -1055,15 +1061,6 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		 *    throttling so we could easily OOM just because too many
 		 *    pages are in writeback and there is nothing else to
 		 *    reclaim. Wait for the writeback to complete.
-		 *
-		 * In cases 1) and 2) we activate the pages to get them out of
-		 * the way while we continue scanning for clean pages on the
-		 * inactive list and refilling from the active list. The
-		 * observation here is that waiting for disk writes is more
-		 * expensive than potentially causing reloads down the line.
-		 * Since they're marked for immediate reclaim, they won't put
-		 * memory pressure on the cache working set any longer than it
-		 * takes to write them to disk.
 		 */
 		if (PageWriteback(page)) {
 			/* Case 1 above */
@@ -1071,7 +1068,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 			    PageReclaim(page) &&
 			    (pgdat && test_bit(PGDAT_WRITEBACK, &pgdat->flags))) {
 				nr_immediate++;
-				goto activate_locked;
+				goto keep_locked;
 
 			/* Case 2 above */
 			} else if (sane_reclaim(sc) ||
@@ -1089,7 +1086,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 				 */
 				SetPageReclaim(page);
 				nr_writeback++;
-				goto activate_locked;
+				goto keep_locked;
 
 			/* Case 3 above */
 			} else {
@@ -1160,18 +1157,14 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 
 		if (PageDirty(page)) {
 			/*
-			 * Only kswapd can writeback filesystem pages
-			 * to avoid risk of stack overflow. But avoid
-			 * injecting inefficient single-page IO into
-			 * flusher writeback as much as possible: only
-			 * write pages when we've encountered many
-			 * dirty pages, and when we've already scanned
-			 * the rest of the LRU for clean pages and see
-			 * the same dirty pages again (PageReclaim).
+			 * Only kswapd can writeback filesystem pages to
+			 * avoid risk of stack overflow but only writeback
+			 * if many dirty pages have been encountered.
 			 */
 			if (page_is_file_cache(page) &&
-			    (!current_is_kswapd() || !PageReclaim(page) ||
-			     !test_bit(PGDAT_DIRTY, &pgdat->flags))) {
+					(!current_is_kswapd() ||
+					(pgdat &&
+					 !test_bit(PGDAT_DIRTY, &pgdat->flags)))) {
 				/*
 				 * Immediately reclaim when written back.
 				 * Similar in principal to deactivate_page()
@@ -1181,7 +1174,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 				inc_node_page_state(page, NR_VMSCAN_IMMEDIATE);
 				SetPageReclaim(page);
 
-				goto activate_locked;
+				goto keep_locked;
 			}
 
 			if (references == PAGEREF_RECLAIM_CLEAN)
@@ -1427,16 +1420,23 @@ int __isolate_lru_page(struct page *page, isolate_mode_t mode)
 	 * wants to isolate pages it will be able to operate on without
 	 * blocking - clean pages for the most part.
 	 *
+	 * ISOLATE_CLEAN means that only clean pages should be isolated. This
+	 * is used by reclaim when it is cannot write to backing storage
+	 *
 	 * ISOLATE_ASYNC_MIGRATE is used to indicate that it only wants to pages
 	 * that it is possible to migrate without blocking
 	 */
-	if (mode & ISOLATE_ASYNC_MIGRATE) {
+	if (mode & (ISOLATE_CLEAN|ISOLATE_ASYNC_MIGRATE)) {
 		/* All the caller can do on PageWriteback is block */
 		if (PageWriteback(page))
 			return ret;
 
 		if (PageDirty(page)) {
 			struct address_space *mapping;
+
+			/* ISOLATE_CLEAN means only clean pages */
+			if (mode & ISOLATE_CLEAN)
+				return ret;
 
 			/*
 			 * Only pages without mappings or that have a
@@ -1835,6 +1835,8 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 
 	if (!sc->may_unmap)
 		isolate_mode |= ISOLATE_UNMAPPED;
+	if (!sc->may_writepage)
+		isolate_mode |= ISOLATE_CLEAN;
 
 	spin_lock_irq(&pgdat->lru_lock);
 
@@ -1896,20 +1898,6 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 		set_bit(PGDAT_WRITEBACK, &pgdat->flags);
 
 	/*
-	 * If dirty pages are scanned that are not queued for IO, it
-	 * implies that flushers are not doing their job. This can
-	 * happen when memory pressure pushes dirty pages to the end of
-	 * the LRU before the dirty limits are breached and the dirty
-	 * data has expired. It can also happen when the proportion of
-	 * dirty pages grows not through writes but through memory
-	 * pressure reclaiming all the clean cache. And in some cases,
-	 * the flushers simply cannot keep up with the allocation
-	 * rate. Nudge the flusher threads in case they are asleep.
-	 */
-	if (nr_unqueued_dirty == nr_taken)
-		wakeup_flusher_threads(0, WB_REASON_VMSCAN);
-
-	/*
 	 * Legacy memcg will stall in page writeback so avoid forcibly
 	 * stalling here.
 	 */
@@ -1921,7 +1909,12 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 		if (nr_dirty && nr_dirty == nr_congested)
 			set_bit(PGDAT_CONGESTED, &pgdat->flags);
 
-		/* Allow kswapd to start writing pages during reclaim. */
+		/*
+		 * If dirty pages are scanned that are not queued for IO, it
+		 * implies that flushers are not keeping up. In this case, flag
+		 * the pgdat PGDAT_DIRTY and kswapd will start writing pages from
+		 * reclaim context.
+		 */
 		if (nr_unqueued_dirty == nr_taken)
 			set_bit(PGDAT_DIRTY, &pgdat->flags);
 
@@ -1943,7 +1936,6 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 	if (!sc->hibernation_mode && !current_is_kswapd() &&
 	    current_may_throttle())
 		wait_iff_congested(pgdat, BLK_RW_ASYNC, HZ/10);
-
 	trace_mm_vmscan_lru_shrink_inactive(pgdat->node_id,
 			nr_scanned, nr_reclaimed,
 			sc->priority, file);
@@ -2031,6 +2023,8 @@ static void shrink_active_list(unsigned long nr_to_scan,
 
 	if (!sc->may_unmap)
 		isolate_mode |= ISOLATE_UNMAPPED;
+	if (!sc->may_writepage)
+		isolate_mode |= ISOLATE_CLEAN;
 
 	spin_lock_irq(&pgdat->lru_lock);
 
@@ -2139,7 +2133,6 @@ static bool inactive_list_is_low(struct lruvec *lruvec, bool file,
 	enum lru_list inactive_lru = file * LRU_FILE;
 	enum lru_list active_lru = file * LRU_FILE + LRU_ACTIVE;
 	unsigned long gb;
-
 	/*
 	 * If we don't have swap space, anonymous page deactivation
 	 * is pointless.
@@ -2832,6 +2825,8 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 					  struct scan_control *sc)
 {
 	int initial_priority = sc->priority;
+	unsigned long total_scanned = 0;
+	unsigned long writeback_threshold;
 retry:
 	delayacct_freepages_start();
 
@@ -2844,6 +2839,7 @@ retry:
 		sc->nr_scanned = 0;
 		shrink_zones(zonelist, sc);
 
+		total_scanned += sc->nr_scanned;
 		if (sc->nr_reclaimed >= sc->nr_to_reclaim)
 			break;
 
@@ -2856,6 +2852,20 @@ retry:
 		 */
 		if (sc->priority < DEF_PRIORITY - 2)
 			sc->may_writepage = 1;
+
+		/*
+		 * Try to write back as many pages as we just scanned.  This
+		 * tends to cause slow streaming writers to write data to the
+		 * disk smoothly, at the dirtying rate, which is nice.   But
+		 * that's undesirable in laptop mode, where we *want* lumpy
+		 * writeout.  So in laptop mode, write out the whole world.
+		 */
+		writeback_threshold = sc->nr_to_reclaim + sc->nr_to_reclaim / 2;
+		if (total_scanned > writeback_threshold) {
+			wakeup_flusher_threads(laptop_mode ? 0 : total_scanned,
+						WB_REASON_TRY_TO_FREE_PAGES);
+			sc->may_writepage = 1;
+		}
 	} while (--sc->priority >= 0);
 
 	delayacct_freepages_end();
@@ -3620,7 +3630,11 @@ void wakeup_kswapd(struct zone *zone, int order, enum zone_type classzone_idx)
 	wake_up_interruptible(&pgdat->kswapd_wait);
 }
 
-#ifdef CONFIG_HIBERNATION
+//#ifndef VENDOR_EDIT
+//Yuanliu.Tang@PSW.CN.WiFi.Basic.Crash.1024511, 2017/06/09,
+//Remove for low memory shrink
+//#ifdef CONFIG_HIBERNATION
+//#endif /* VENDOR_EDIT */
 /*
  * Try to free `nr_to_reclaim' of memory, system-wide, and return the number of
  * freed pages.
@@ -3659,7 +3673,13 @@ unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
 
 	return nr_reclaimed;
 }
-#endif /* CONFIG_HIBERNATION */
+//#ifndef VENDOR_EDIT
+//Yuanliu.Tang@PSW.CN.WiFi.Basic.Crash.1024511, 2017/06/09,
+//Modify for low memory shrink
+//#endif /* CONFIG_HIBERNATION */
+//#else /* VENDOR_EDIT */
+EXPORT_SYMBOL(shrink_all_memory);
+//#endif /* VENDOR_EDIT */
 
 /* It's optimal to keep kswapds on the same CPUs as their memory, but
    not required for correctness.  So if the last cpu in a node goes

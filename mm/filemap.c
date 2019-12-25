@@ -47,6 +47,8 @@
 
 #include <asm/mman.h>
 
+int want_old_faultaround_pte = 1;
+
 /*
  * Shared mappings implemented 30.11.1994. It's not fully working yet,
  * though.
@@ -618,7 +620,7 @@ int replace_page_cache_page(struct page *old, struct page *new, gfp_t gfp_mask)
 	VM_BUG_ON_PAGE(!PageLocked(new), new);
 	VM_BUG_ON_PAGE(new->mapping, new);
 
-	error = radix_tree_preload(gfp_mask & GFP_RECLAIM_MASK);
+	error = radix_tree_preload(gfp_mask & ~__GFP_HIGHMEM);
 	if (!error) {
 		struct address_space *mapping = old->mapping;
 		void (*freepage)(struct page *);
@@ -674,7 +676,7 @@ static int __add_to_page_cache_locked(struct page *page,
 			return error;
 	}
 
-	error = radix_tree_maybe_preload(gfp_mask & GFP_RECLAIM_MASK);
+	error = radix_tree_maybe_preload(gfp_mask & ~__GFP_HIGHMEM);
 	if (error) {
 		if (!huge)
 			mem_cgroup_cancel_charge(page, memcg, false);
@@ -1249,7 +1251,8 @@ no_page:
 		if (fgp_flags & FGP_ACCESSED)
 			__SetPageReferenced(page);
 
-		err = add_to_page_cache_lru(page, mapping, offset, gfp_mask);
+		err = add_to_page_cache_lru(page, mapping, offset,
+				gfp_mask & GFP_RECLAIM_MASK);
 		if (unlikely(err)) {
 			put_page(page);
 			page = NULL;
@@ -1997,7 +2000,7 @@ static int page_cache_read(struct file *file, pgoff_t offset, gfp_t gfp_mask)
 		if (!page)
 			return -ENOMEM;
 
-		ret = add_to_page_cache_lru(page, mapping, offset, gfp_mask);
+		ret = add_to_page_cache_lru(page, mapping, offset, gfp_mask & GFP_KERNEL);
 		if (ret == 0)
 			ret = mapping->a_ops->readpage(file, page);
 		else if (ret == -EEXIST)
@@ -2287,6 +2290,14 @@ repeat:
 		if (fe->pte)
 			fe->pte += iter.index - last_pgoff;
 		last_pgoff = iter.index;
+
+		if (want_old_faultaround_pte) {
+			if (fe->address == fe->fault_address)
+				fe->flags &= ~FAULT_FLAG_PREFAULT_OLD;
+			else
+				fe->flags |= FAULT_FLAG_PREFAULT_OLD;
+		}
+
 		if (alloc_set_pte(fe, NULL, page))
 			goto unlock;
 		unlock_page(page);
@@ -2719,6 +2730,8 @@ ssize_t generic_perform_write(struct file *file,
 						iov_iter_count(i));
 
 again:
+#ifndef VENDOR_EDIT
+//Guohua.Zhong@BSP.Storage.Sdcard,20180630 modify for use is_fsck_process whitelist "fsck"
 		/*
 		 * Bring in the user page that we will copy from _first_.
 		 * Otherwise there's a nasty deadlock on copying from the
@@ -2733,7 +2746,7 @@ again:
 			status = -EFAULT;
 			break;
 		}
-
+#endif
 		if (fatal_signal_pending(current)) {
 			status = -EINTR;
 			break;
@@ -2746,8 +2759,23 @@ again:
 
 		if (mapping_writably_mapped(mapping))
 			flush_dcache_page(page);
-
+#if defined(VENDOR_EDIT)
+//Guohua.Zhong@BSP.Storage.Sdcard,20180630 modify for use is_fsck_process whitelist "fsck"
+		/*
+		 * 'page' is now locked.  If we are trying to copy from a
+		 * mapping of 'page' in userspace, the copy might fault and
+		 * would need PageUptodate() to complete.  But, page can not be
+		 * made Uptodate without acquiring the page lock, which we hold.
+		 * Deadlock.  Avoid with pagefault_disable().  Fix up below with
+		 * iov_iter_fault_in_readable().
+		 */
+		pagefault_disable();
+#endif
 		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
+#if defined(VENDOR_EDIT)
+//Guohua.Zhong@BSP.Storage.Sdcard,20180630 modify for use is_fsck_process whitelist "fsck"
+		pagefault_enable();
+#endif
 		flush_dcache_page(page);
 
 		status = a_ops->write_end(file, mapping, pos, bytes, copied,
@@ -2770,6 +2798,17 @@ again:
 			 */
 			bytes = min_t(unsigned long, PAGE_SIZE - offset,
 						iov_iter_single_seg_count(i));
+#if defined(VENDOR_EDIT)
+//Guohua.Zhong@BSP.Storage.Sdcard,20180630 modify for use is_fsck_process whitelist "fsck"
+			/*
+			 * This is the fallback to recover if the copy from
+			 * userspace above faults.
+			 */
+			if (unlikely(iov_iter_fault_in_readable(i, bytes))) {
+				status = -EFAULT;
+				break;
+			}
+#endif
 			goto again;
 		}
 		pos += copied;
